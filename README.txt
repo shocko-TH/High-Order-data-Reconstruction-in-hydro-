@@ -8,9 +8,7 @@ Main idea :
 In one-dimesional simulation , the flux is trivially propagating 
 to next grid. But let us consider a two-dimesional case it would 
 be quite disagreement. We knew that a source plane wave can 
-discribe by f(r) for isotropic. So if the signal propagating
-couldn't be analysis in diagonal grid , the energy suppose 
-dissipation .
+discribe by f(r) for isotropic.
 
 Try or Not : 
 1. A grid of density , like a source. Then gaving it more grids.
