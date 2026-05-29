@@ -9,6 +9,7 @@
 /// 05/25 | Done | 2D was wierd that dt would getting small .
 ///              | MAybe I should give dt constant.
 /// 05/26 | Work | Rebuild data reconstruction .
+/// 05/29 | Work | PPM or the other methods.
 ///////////////////////////////////////////////////////////////////
 
 #include <iostream>
@@ -19,6 +20,7 @@
 #include <functional>
 #include <cstdio>
 #include <filesystem>
+#include <algorithm>
 
 using namespace std;
 
@@ -31,22 +33,24 @@ using namespace std;
 int         Nx = 512, Ny = 512 , xmax = 10 , ymax = 10;
 int         nghost = 2 ;
 double      dx = 2*float(xmax)/float(Nx) , dy = 2*float(ymax)/float(Ny);
-string      Dir="Data" , prob="Gauss_2D";
+string      Dir="Data" , prob="Euler_2D_4";
 
 const int   Nx_tot = Nx + 2 * nghost;
 const int   Ny_tot = Ny + 2 * nghost;
 
 double      dt=1e-1 , t=0;
-int         total_step  = 400;
+int         total_step  = 700;
 const int   Estep  = 10;                            // saving data step
+double total_calc_time = 0.0;
 
 // Physics constant
 const double cs     = 1.0; 
 const double cfl    = 0.2;
 const double gam    = 5.0/3.0;                      // adaibatic constant
+const double G      = 10.0;                         // gravity const
 const double inv_dx = 1.0/dx , inv_dy = 1.0/dy;
 const double rho_f  = 1e-6   , P_f    = 1e-6;       // Avoid unphysical value 
-const double R      = 3.0;                          // initial condition circle radius
+const double R      = 2.0;                          // initial condition circle radius
 
 
 ////////////////////////////////////////////////////////////////////////////
@@ -69,8 +73,10 @@ inline int idx(int i, int j) { return j * Nx_tot + i; }
 //===========================================================================
 // Conserved 
 struct ConsState {
-    double rho , E ;
-    double mu  , mv;
+    double rho ;
+    double mu  ;
+    double mv  ;
+    double E   ;
 
     // +
     ConsState operator+(const ConsState& other) const {
@@ -105,7 +111,10 @@ struct ConsState {
 //===========================================================================
 // Prime
 struct PrimState {
-    double rho, u,v, P;
+    double rho ;
+    double u   ;
+    double v   ; 
+    double P   ;
 };
 
 //===========================================================================
@@ -168,7 +177,7 @@ inline double Get_Pressure(const ConsState& U){
 
 //===========================================================================
 // Flux
-inline ConsState Get_Flux(const ConsState& U , char T_v) {
+inline ConsState Get_Flux(const ConsState& U , char& T_v) {
     double rho = max(U.rho , rho_f);    
     double u   = U.mu / rho;
     double v   = U.mv / rho;
@@ -191,7 +200,7 @@ inline ConsState Get_Flux(const ConsState& U , char T_v) {
 
 //===========================================================================
 // C Max
-inline double Get_Max_Speed(const ConsState& ULs, const ConsState& URs , char T_v) {
+inline double Get_Max_Speed(const ConsState& ULs, const ConsState& URs , char& T_v) {
     double rho_L = max(ULs.rho, rho_f); 
     double rho_R = max(URs.rho, rho_f);
 
@@ -215,9 +224,9 @@ inline double Get_Max_Speed(const ConsState& ULs, const ConsState& URs , char T_
 double Get_CFL_Dt(const vector<ConsState>& U) {
     double max_speed = 0.0;
 
-    #pragma omp parallel for reduction(max:max_speed)
-    for(int j = nghost; j < Ny_tot; j++) {
-        for(int i = nghost; i < Nx_tot; i++) {
+    #pragma omp parallel for collapse(2) reduction(max:max_speed)
+    for(int j = nghost; j < Ny_tot-nghost; j++) {
+        for(int i = nghost; i < Nx_tot-nghost; i++) {
             PrimState p = ConsToPrim(U[idx(i,j)]);
             double a = sqrt(gam * p.P / p.rho);
             double speed_x = abs(p.u) + a;
@@ -237,60 +246,41 @@ void Initial_Value( vector<ConsState>& u0 ,vector<double>& x , vector<double>& y
         if(filesystem::create_directory(dir_path)){cout << "Success build " << dir_path << endl;}
     };
 
-    const double rho_bg = 1.0;     
-    const double P_bg   = 1.0;     
-    const double u_bg   = 1.0;     
-    const double v_bg   = 1.0;     
-    
-    const double amp    = 1.0;     
-    const double sigma  = 5.0;
-    
-    #pragma omp parallel for collapse(2)
-    for (int j = 0; j < Ny_tot; j++) {
-        for (int i = 0; i < Nx_tot; i++) {
-            double r2 = x[i] * x[i] + y[j] * y[j];
-                    
-            PrimState P_init;
-            double rho_val = rho_bg + amp * exp(-r2 / (2.0 * sigma * sigma));
-            if(y[j]>0){
-                P_init = {rho_val, u_bg, v_bg, P_bg};
-            }else{
-                P_init = {rho_val, -u_bg, v_bg, P_bg};
-            }
-
-            u0[idx(i, j)] = PrimToCons(P_init);
-        }
-        
-    }
     // // from nghost to Ni , since the boundary is wrong value.
-    // #pragma omp parallel for collapse(2) 
-    // for (int j = nghost ; j < Ny_tot-nghost ; j++){
-    //     for (int i = nghost ; i < Nx_tot-nghost ; i++){
-            
-    //         // u0[idx(i, j)].rho = exp(-r*r/(2*5)); 
-    //         // u0[idx(i, j)].mu  = 0*u0[idx(i, j)].rho;
-    //         // u0[idx(i, j)].mv  = 0*u0[idx(i, j)].rho;
-    //         // u0[idx(i, j)].E   = 1.0 / (gam - 1.0);
+    #pragma omp parallel for collapse(2) 
+    for (int j = nghost ; j < Ny_tot-nghost ; j++){
+        for (int i = nghost ; i < Nx_tot-nghost ; i++){
+            const double id   = idx(i,j);
+            const double rho0 = 5.0;
+            const double P0   = 100.0;
+            const double U0   = 1.0;
 
-    //         double r   = sqrt(x[i]*x[i] + y[j]*y[j]);
-    //         if(r < R){
-    //             double P  = 1.0 ;
-    //             u0[idx(i, j)].rho = 5.0 ;
-    //             u0[idx(i, j)].mu  = 0*u0[idx(i, j)].rho;
-    //             u0[idx(i, j)].mv  = x[i]/xmax*u0[idx(i, j)].rho;
-    //             u0[idx(i, j)].E   = P/(gam-1.0);
-    //             // u0[idx(i, j)].E   = P/(gam - 1.0) + 0.5*(u0[idx(i, j)].mu * u0[idx(i, j)].mu + u0[idx(i, j)].mv * u0[idx(i, j)].mv)/u0[idx(i, j)].rho ;
-    //         }else{
-    //             double P  = 0.10 ;
-    //             u0[idx(i, j)].rho = 1.0;
-    //             u0[idx(i, j)].mu  = 0*u0[idx(i, j)].rho;
-    //             u0[idx(i, j)].mv  = 0*u0[idx(i, j)].rho;
-    //             u0[idx(i, j)].E   = P/(gam-1.0);
-    //             // u0[idx(i, j)].E   = P/(gam - 1.0) + 0.5*(u0[idx(i, j)].mu * u0[idx(i, j)].mu + u0[idx(i, j)].mv * u0[idx(i, j)].mv)/u0[idx(i, j)].rho ;
-    //         }
-    //     }
-    // }
+            u0[id].rho =  rho0;
+            u0[id].mv  =  rho0 * U0 * sin(x[i]/xmax) * cos(y[i]/ymax);
+            u0[id].mv  = -rho0 * U0 * cos(x[i]/xmax) * sin(y[i]/ymax);
+            double P   =  P0 + rho0 * U0 * U0 /4.0 * (cos(2.0*x[i]/xmax)+cos(2.0*y[i]/ymax));
+            u0[id].E   =  P/(gam - 1.0) + 0.5*(u0[id].mu * u0[id].mu + u0[id].mv * u0[id].mv)/rho0 ;
+            // Classical Riemman solver
+            // double r   = sqrt(x[i]*x[i] + y[j]*y[j]);
+            // if(r < R){
+            //     double P  = 100.0 ;
+            //     u0[idx].rho = 10;
+            //     u0[idx].mu  = 0*u0[idx].rho;
+            //     u0[idx].mv  = 0*u0[idx].rho;
+            //     // u0[idx(i, j)].E   = P/(gam-1.0) ;
+            //     u0[idx].E   = P/(gam - 1.0) + 0.5*(u0[idx].mu * u0[idx].mu + u0[idx].mv * u0[idx].mv)/u0[idx].rho ;
+            // }else{
+            //     double P  = 0.10 ;
+            //     u0[idx].rho = 0.1;
+            //     u0[idx].mu  = 0*u0[idx].rho;
+            //     u0[idx].mv  = 0*u0[idx].rho;
+            //     // u0[idx(i, j)].E   = P/(gam-1.0);
+            //     u0[idx].E   = P/(gam - 1.0) + 0.5*(u0[idx].mu * u0[idx].mu + u0[idx].mv * u0[idx].mv)/u0[idx].rho ;
+            // }
+        }
+    }
 }
+
 
 /////////////////////////////////////////////////////////////////////////////
 ///////////////////////////  Data Reconstruct  //////////////////////////////
@@ -315,56 +305,56 @@ void Data_Reconstruct(
         PT[i] = P[i]; PB[i] = P[i];
     }
 
-    // X Reconstruction
-    #pragma omp parallel for collapse(2) 
-    for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
-        for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
-            int id    = idx(i, j);
-            int id_p1 = idx(i + 1, j);
-            int id_m1 = idx(i - 1, j);
-            
-            double s_rho = slope_Limiter((P[id].rho - P[id_m1].rho) * inv_dx, (P[id_p1].rho - P[id].rho) * inv_dx);
-            double s_u   = slope_Limiter((P[id].u   - P[id_m1].u  ) * inv_dx, (P[id_p1].u   - P[id].u  ) * inv_dx);
-            double s_v   = slope_Limiter((P[id].v   - P[id_m1].v  ) * inv_dx, (P[id_p1].v   - P[id].v  ) * inv_dx);
-            double s_P   = slope_Limiter((P[id].P   - P[id_m1].P  ) * inv_dx, (P[id_p1].P   - P[id].P  ) * inv_dx);
+        // X Reconstruction
+        #pragma omp parallel for collapse(2) 
+        for (int j = nghost-1; j < Ny_tot-nghost; j++) {
+            for (int i = nghost-1; i < Nx_tot-nghost; i++) {
+                int id    = idx(i, j);
+                int id_p1 = idx(i + 1, j);
+                int id_m1 = idx(i - 1, j);
+                
+                double s_rho = slope_Limiter((P[id].rho - P[id_m1].rho) * inv_dx, (P[id_p1].rho - P[id].rho) * inv_dx);
+                double s_u   = slope_Limiter((P[id].u   - P[id_m1].u  ) * inv_dx, (P[id_p1].u   - P[id].u  ) * inv_dx);
+                double s_v   = slope_Limiter((P[id].v   - P[id_m1].v  ) * inv_dx, (P[id_p1].v   - P[id].v  ) * inv_dx);
+                double s_P   = slope_Limiter((P[id].P   - P[id_m1].P  ) * inv_dx, (P[id_p1].P   - P[id].P  ) * inv_dx);
 
-            PR[id].rho = P[id].rho + 0.5 * dx * s_rho;
-            PR[id].u   = P[id].u   + 0.5 * dx * s_u;
-            PR[id].v   = P[id].v   + 0.5 * dx * s_v;
-            PR[id].P   = P[id].P   + 0.5 * dx * s_P;
+                PR[id].rho = P[id].rho + 0.5 * dx * s_rho;
+                PR[id].u   = P[id].u   + 0.5 * dx * s_u;
+                PR[id].v   = P[id].v   + 0.5 * dx * s_v;
+                PR[id].P   = P[id].P   + 0.5 * dx * s_P;
 
-            PL[id].rho = P[id].rho - 0.5 * dx * s_rho;
-            PL[id].u   = P[id].u   - 0.5 * dx * s_u;
-            PL[id].v   = P[id].v   - 0.5 * dx * s_v;
-            PL[id].P   = P[id].P   - 0.5 * dx * s_P;
+                PL[id].rho = P[id].rho - 0.5 * dx * s_rho;
+                PL[id].u   = P[id].u   - 0.5 * dx * s_u;
+                PL[id].v   = P[id].v   - 0.5 * dx * s_v;
+                PL[id].P   = P[id].P   - 0.5 * dx * s_P;
+            }
         }
-    }
 
-    // Y Reconstruction
-    #pragma omp parallel for collapse(2) 
-    for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
-        for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
-            int id    = idx(i, j);
-            int id_p1 = idx(i, j + 1);
-            int id_m1 = idx(i, j - 1);
-            
-            double s_rho = slope_Limiter((P[id].rho - P[id_m1].rho) * inv_dy, (P[id_p1].rho - P[id].rho) * inv_dy);
-            double s_u   = slope_Limiter((P[id].u   - P[id_m1].u  ) * inv_dy, (P[id_p1].u   - P[id].u  ) * inv_dy);
-            double s_v   = slope_Limiter((P[id].v   - P[id_m1].v  ) * inv_dy, (P[id_p1].v   - P[id].v  ) * inv_dy);
-            double s_P   = slope_Limiter((P[id].P   - P[id_m1].P  ) * inv_dy, (P[id_p1].P   - P[id].P  ) * inv_dy);
+        // Y Reconstruction
+        #pragma omp parallel for collapse(2) 
+        for (int j = nghost-1; j < Ny_tot-nghost; j++) {
+            for (int i = nghost-1; i < Nx_tot-nghost; i++) {
+                int id    = idx(i, j);
+                int id_p1 = idx(i, j + 1);
+                int id_m1 = idx(i, j - 1);
+                
+                double s_rho = slope_Limiter((P[id].rho - P[id_m1].rho) * inv_dy, (P[id_p1].rho - P[id].rho) * inv_dy);
+                double s_u   = slope_Limiter((P[id].u   - P[id_m1].u  ) * inv_dy, (P[id_p1].u   - P[id].u  ) * inv_dy);
+                double s_v   = slope_Limiter((P[id].v   - P[id_m1].v  ) * inv_dy, (P[id_p1].v   - P[id].v  ) * inv_dy);
+                double s_P   = slope_Limiter((P[id].P   - P[id_m1].P  ) * inv_dy, (P[id_p1].P   - P[id].P  ) * inv_dy);
 
-            PT[id].rho = P[id].rho + 0.5 * dy * s_rho;
-            PT[id].u   = P[id].u   + 0.5 * dy * s_u;
-            PT[id].v   = P[id].v   + 0.5 * dy * s_v;
-            PT[id].P   = P[id].P   + 0.5 * dy * s_P;
+                PT[id].rho = P[id].rho + 0.5 * dy * s_rho;
+                PT[id].u   = P[id].u   + 0.5 * dy * s_u;
+                PT[id].v   = P[id].v   + 0.5 * dy * s_v;
+                PT[id].P   = P[id].P   + 0.5 * dy * s_P;
 
-            PB[id].rho = P[id].rho - 0.5 * dy * s_rho;
-            PB[id].u   = P[id].u   - 0.5 * dy * s_u;
-            PB[id].v   = P[id].v   - 0.5 * dy * s_v;
-            PB[id].P   = P[id].P   - 0.5 * dy * s_P;
+                PB[id].rho = P[id].rho - 0.5 * dy * s_rho;
+                PB[id].u   = P[id].u   - 0.5 * dy * s_u;
+                PB[id].v   = P[id].v   - 0.5 * dy * s_v;
+                PB[id].P   = P[id].P   - 0.5 * dy * s_P;
+            }
         }
-    }
-
+    
     // Convert to ConsState
     #pragma omp parallel for
     for (int i = 0; i < Nx_tot * Ny_tot; i++) {
@@ -378,6 +368,7 @@ void Data_Reconstruct(
         UT[i] = PrimToCons(PT[i]);
         UB[i] = PrimToCons(PB[i]);
     }
+
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -464,48 +455,33 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
     vector<ConsState> UL(Nx_tot * Ny_tot) , UR(Nx_tot * Ny_tot) , UT(Nx_tot * Ny_tot) , UB(Nx_tot * Ny_tot);
     vector<ConsState> Flux_x(Nx_tot * Ny_tot) , Flux_y(Nx_tot * Ny_tot);
 
-    // 1 : data reconstruction
+double t_start = omp_get_wtime();
+    // 1 : data reconstruction | 0.035 s
     Data_Reconstruct(U,UL,UR,UT,UB);
-
+double t_end = omp_get_wtime();
+total_calc_time = (t_end - t_start);
+cout << " Flux " << total_calc_time << " s" << endl;
     // 2 : Flux 
     
-    // X
+    // X | 0.2 s 
     #pragma omp parallel for collapse(2)
     for (int j = nghost; j < Ny_tot-nghost; j++) {
         for (int i = nghost; i <= Nx_tot-nghost; i++) {
-
-            // ConsState U_L_state = UR[idx(i-1, j)]; 
-            // ConsState U_R_state = UL[idx(i, j)];   
-
-            // ConsState F_L = Get_Flux(U_L_state, 'x');
-            // ConsState F_R = Get_Flux(U_R_state, 'x');
-
-            // double c_max = Get_Max_Speed(U_L_state, U_R_state, 'x');
-            // // cout << " Max C = " << c_max << endl;
-            // Flux_x[idx(i, j)] = (F_L + F_R) * 0.5 - (U_R_state - U_L_state) * (0.5 * c_max);
             Flux_x[idx(i, j)] = HLLC_Flux(UR[idx(i-1, j)], UL[idx(i, j)], 'x');
+            Flux_y[idx(j, i)] = HLLC_Flux(UT[idx(j, i-1)], UB[idx(j, i)], 'y');
         }
     }
     //===========================================================================
     // Y
-    #pragma omp parallel for collapse(2)
-    for (int j = nghost; j <= Ny_tot-nghost; j++) {
-        for (int i = nghost; i < Nx_tot-nghost; i++) {
+    // #pragma omp parallel for collapse(2)
+    // for (int j = nghost; j <= Ny_tot-nghost; j++) {
+    //     for (int i = nghost; i < Nx_tot-nghost; i++) {
+    //             Flux_y[idx(i, j)] = HLLC_Flux(UT[idx(i, j-1)], UB[idx(i, j )], 'y');
+    //     }
+    // }
 
-            // ConsState U_B_state = UT[idx(i, j-1)]; 
-            // ConsState U_T_state = UB[idx(i, j)];   
+    // 3: dU/dt | 0.17 s
 
-            // ConsState G_B = Get_Flux(U_B_state, 'y');
-            // ConsState G_T = Get_Flux(U_T_state, 'y');
-
-            // double c_max = Get_Max_Speed(U_B_state, U_T_state, 'y');
-
-            // Flux_y[idx(i, j)] = (G_B + G_T) * 0.5 - (U_T_state - U_B_state) * (0.5 * c_max);
-            Flux_y[idx(i, j)] = HLLC_Flux(UT[idx(i, j-1)], UB[idx(i, j )], 'y');
-        }
-    }
-
-    // 3: dU/dt
     #pragma omp parallel for collapse(2)
     for (int j = nghost; j < Ny_tot-nghost; j++) {
         for (int i = nghost; i < Nx_tot-nghost; i++) {
@@ -516,6 +492,7 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
             dUdt[idx(i, j)] = -(dFx_dx + dGy_dy);
         }
     }
+
 
 }    
 /////////////////////////////////////////////////////////////////////////////
@@ -528,16 +505,21 @@ void RK2_Step(const vector<ConsState>& Un, vector<ConsState>& Unext, double dt) 
     vector<ConsState> k1(Nx_tot * Ny_tot );
     vector<ConsState> k2(Nx_tot * Ny_tot);
     vector<ConsState> U_pred(Nx_tot * Ny_tot);
-
+    omp_set_nested(1);
+    
+    // Riemman Solver 0.08s
     Euler_Riemann_Operator(Un, k1);
+
     #pragma omp parallel for
     for (int i = 0; i < Nx_tot * Ny_tot; i++) {
         U_pred[i] = Un[i] + k1[i] * dt;
     }
+
     Apply_Boundary(U_pred);
 
     Euler_Riemann_Operator(U_pred, k2);
-    
+
+    // Floor check 0.001s
     #pragma omp parallel for
     for (int i = 0; i < Nx_tot * Ny_tot; i++) {
         Unext[i] = Un[i] + (k1[i] + k2[i]) * 0.5 * dt;
@@ -548,7 +530,9 @@ void RK2_Step(const vector<ConsState>& Un, vector<ConsState>& Unext, double dt) 
             Unext[i].E = rho_f ;
         }
     }
+
     Apply_Boundary(Unext);
+
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -586,39 +570,59 @@ int main(){
 
     vector<ConsState> u_next(Nx_tot * Ny_tot) ;
     for (int step=1 ; step <= total_step ; step++){
+
+        double t_start = omp_get_wtime();
         double dt = Get_CFL_Dt(u0);
 
         t += dt;
 
         // Euler_Step(u0, u_next, k1,dt);
         RK2_Step(u0,u_next,dt);
-        u0.swap(u_next);
-        Apply_Boundary(u0);
 
-        if (step % Estep == 0) {
-            char buffer[50];
-            std::snprintf(buffer, sizeof(buffer), "%04d", step / Estep);
-            std::string stepStr = buffer;
+        // check Nan then break
+        // auto it = std::find_if(u_next.begin(), u_next.end(), [](const ConsState& s) {
+        //     return std::isnan(s.rho) || std::isnan(s.E) || std::isnan(s.mu) || std::isnan(s.mv);
+        // });
+
+        // if (it != u_next.end()) {
+        //     cout << "  Nan Wrong  " << endl;
+        //     break;
+        // }
+
+        u0.swap(u_next);
+
+        double t_end = omp_get_wtime();
+        total_calc_time += (t_end - t_start);
+
+        // u0=u_next;
+        // Apply_Boundary(u0);
+
+        // Output
+        // if (step % Estep == 0) {
+        //     char buffer[50];
+        //     std::snprintf(buffer, sizeof(buffer), "%04d", step / Estep);
+        //     std::string stepStr = buffer;
 
             cout << "==========================================================" << endl;
-            cout << " Time = " << t << " , dt = " << dt << endl;
-            cout << " Step = " << step << " | Center density rho = " << u0[Nx/2].rho << endl;
+            cout << " Simulation Time = " << t << " , dt = " << dt << endl;
+            cout << "            Step = " << step << " | Center density rho = " << u0[idx(Nx_tot/2,Ny_tot/2)].rho << endl;
+            cout << "       Real Time = " << total_calc_time << " s | Spend Time = " << t_end - t_start << " s" << endl;
 
-            string Fname = "Final.csv";
-            ofstream outFile("../" + Dir + "/"+ prob + "/" + prob + "_" + stepStr + "_" + Fname);
-            outFile << "t,x,y,rho,mu,mv,E,u,v,P\n";
-            for (int i=nghost ; i < Nx+nghost ; i++){
-                for (int j=nghost ; j < Ny+nghost ; j++){
+        //     string Fname = "Final.csv";
+        //     ofstream outFile("../" + Dir + "/"+ prob + "/" + prob + "_" + stepStr + "_" + Fname);
+        //     outFile << "t,x,y,rho,mu,mv,E,u,v,P\n";
+        //     for (int i=nghost ; i < Nx+nghost ; i++){
+        //         for (int j=nghost ; j < Ny+nghost ; j++){
 
-                    PrimState P = ConsToPrim(u0[idx(i,j)]);
-                    outFile << t               << " , ";
-                    outFile << x[i]            << " , " << y[j]            << " , " << u0[idx(i,j)].rho  << " , ";
-                    outFile << u0[idx(i,j)].mu << " , " << u0[idx(i,j)].mv << " , " << u0[idx(i,j)].E    << " , "; 
-                    outFile << P.u             << " , " << P.v             << " , " << P.P               << '\n' ;
-                }
-            }
-            outFile.close();
-        }
+        //             PrimState P = ConsToPrim(u0[idx(i,j)]);
+        //             outFile << t               << " , ";
+        //             outFile << x[i]            << " , " << y[j]            << " , " << u0[idx(i,j)].rho  << " , ";
+        //             outFile << u0[idx(i,j)].mu << " , " << u0[idx(i,j)].mv << " , " << u0[idx(i,j)].E    << " , "; 
+        //             outFile << P.u             << " , " << P.v             << " , " << P.P               << '\n' ;
+        //         }
+        //     }
+        //     outFile.close();
+        // }
         // initial value
         // for(int j = nghost ; j < Ny_tot-nghost; j++){
         //     for(int i = nghost ; i < Nx_tot-nghost ; i++){
