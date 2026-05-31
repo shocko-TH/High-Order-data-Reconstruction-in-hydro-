@@ -11,6 +11,9 @@
 /// 05/26 | Work | Rebuild data reconstruction .
 /// 05/29 | Work | PPM or the other methods.
 ///////////////////////////////////////////////////////////////////
+// Avoid to announce vector Variables in loop. 
+// But normol variable is allowed
+///////////////////////////////////////////////////////////////////
 
 #include <iostream>
 #include <omp.h>
@@ -30,27 +33,27 @@ using namespace std;
 // Change here to setting in another txt file ???
 
 // Grid set
-int         Nx = 512, Ny = 512 , xmax = 10 , ymax = 10;
-int         nghost = 2 ;
+int         Nx = 512*2, Ny = 512*2 , xmax = 10 , ymax = 10;
+int         nghost = 3 ;
 double      dx = 2*float(xmax)/float(Nx) , dy = 2*float(ymax)/float(Ny);
-string      Dir="Data" , prob="Euler_2D_4";
+string      Dir="Data" , prob="Euler_2D_2_PPM";
 
 const int   Nx_tot = Nx + 2 * nghost;
 const int   Ny_tot = Ny + 2 * nghost;
 
 double      dt=1e-1 , t=0;
-int         total_step  = 700;
+int         total_step  = 500;
 const int   Estep  = 10;                            // saving data step
 double total_calc_time = 0.0;
 
 // Physics constant
 const double cs     = 1.0; 
-const double cfl    = 0.2;
+const double cfl    = 0.5;
 const double gam    = 5.0/3.0;                      // adaibatic constant
 const double G      = 10.0;                         // gravity const
 const double inv_dx = 1.0/dx , inv_dy = 1.0/dy;
 const double rho_f  = 1e-6   , P_f    = 1e-6;       // Avoid unphysical value 
-const double R      = 2.0;                          // initial condition circle radius
+const double R      = 0.1;                          // initial condition circle radius
 
 
 ////////////////////////////////////////////////////////////////////////////
@@ -177,7 +180,7 @@ inline double Get_Pressure(const ConsState& U){
 
 //===========================================================================
 // Flux
-inline ConsState Get_Flux(const ConsState& U , char& T_v) {
+inline ConsState Get_Flux(const ConsState& U , char T_v) {
     double rho = max(U.rho , rho_f);    
     double u   = U.mu / rho;
     double v   = U.mv / rho;
@@ -200,7 +203,7 @@ inline ConsState Get_Flux(const ConsState& U , char& T_v) {
 
 //===========================================================================
 // C Max
-inline double Get_Max_Speed(const ConsState& ULs, const ConsState& URs , char& T_v) {
+inline double Get_Max_Speed(const ConsState& ULs, const ConsState& URs , char T_v) {
     double rho_L = max(ULs.rho, rho_f); 
     double rho_R = max(URs.rho, rho_f);
 
@@ -247,36 +250,37 @@ void Initial_Value( vector<ConsState>& u0 ,vector<double>& x , vector<double>& y
     };
 
     // // from nghost to Ni , since the boundary is wrong value.
+    // const double rho0 = 5.0;
+    // const double P0   = 100.0;
+    // const double U0   = 1.0;
     #pragma omp parallel for collapse(2) 
     for (int j = nghost ; j < Ny_tot-nghost ; j++){
         for (int i = nghost ; i < Nx_tot-nghost ; i++){
             const double id   = idx(i,j);
-            const double rho0 = 5.0;
-            const double P0   = 100.0;
-            const double U0   = 1.0;
 
-            u0[id].rho =  rho0;
-            u0[id].mv  =  rho0 * U0 * sin(x[i]/xmax) * cos(y[i]/ymax);
-            u0[id].mv  = -rho0 * U0 * cos(x[i]/xmax) * sin(y[i]/ymax);
-            double P   =  P0 + rho0 * U0 * U0 /4.0 * (cos(2.0*x[i]/xmax)+cos(2.0*y[i]/ymax));
-            u0[id].E   =  P/(gam - 1.0) + 0.5*(u0[id].mu * u0[id].mu + u0[id].mv * u0[id].mv)/rho0 ;
+            // u0[id].rho =  rho0;
+            // u0[id].mu  =  rho0 * U0 * sin(x[i]/xmax) * cos(y[i]/ymax);
+            // u0[id].mv  = -rho0 * U0 * cos(x[i]/xmax) * sin(y[i]/ymax);
+            // double P   =  P0 + rho0 * U0 * U0 /4.0 * (cos(2.0*x[i]/xmax)+cos(2.0*y[i]/ymax));
+            // u0[id].E   =  P/(gam - 1.0) + 0.5*(u0[id].mu * u0[id].mu + u0[id].mv * u0[id].mv)/rho0 ;
+
             // Classical Riemman solver
-            // double r   = sqrt(x[i]*x[i] + y[j]*y[j]);
-            // if(r < R){
-            //     double P  = 100.0 ;
-            //     u0[idx].rho = 10;
-            //     u0[idx].mu  = 0*u0[idx].rho;
-            //     u0[idx].mv  = 0*u0[idx].rho;
-            //     // u0[idx(i, j)].E   = P/(gam-1.0) ;
-            //     u0[idx].E   = P/(gam - 1.0) + 0.5*(u0[idx].mu * u0[idx].mu + u0[idx].mv * u0[idx].mv)/u0[idx].rho ;
-            // }else{
-            //     double P  = 0.10 ;
-            //     u0[idx].rho = 0.1;
-            //     u0[idx].mu  = 0*u0[idx].rho;
-            //     u0[idx].mv  = 0*u0[idx].rho;
-            //     // u0[idx(i, j)].E   = P/(gam-1.0);
-            //     u0[idx].E   = P/(gam - 1.0) + 0.5*(u0[idx].mu * u0[idx].mu + u0[idx].mv * u0[idx].mv)/u0[idx].rho ;
-            // }
+            double r   = sqrt(x[i]*x[i] + y[j]*y[j]);
+            if(r < R){
+                double P  = 100.0 ;
+                u0[id].rho = 10;
+                u0[id].mu  = 0*u0[id].rho;
+                u0[id].mv  = 0*u0[id].rho;
+                // u0[id(i, j)].E   = P/(gam-1.0) ;
+                u0[id].E   = 100*P/(gam - 1.0) + 0.5*(u0[id].mu * u0[id].mu + u0[id].mv * u0[id].mv)/u0[id].rho ;
+            }else{
+                double P  = 0.10 ;
+                u0[id].rho = 0.1;
+                u0[id].mu  = 0*u0[id].rho;
+                u0[id].mv  = 0*u0[id].rho;
+                // u0[id(i, j)].E   = P/(gam-1.0);
+                u0[id].E   = P/(gam - 1.0) + 0.5*(u0[id].mu * u0[id].mu + u0[id].mv * u0[id].mv)/u0[id].rho ;
+            }
         }
     }
 }
@@ -285,55 +289,60 @@ void Initial_Value( vector<ConsState>& u0 ,vector<double>& x , vector<double>& y
 /////////////////////////////////////////////////////////////////////////////
 ///////////////////////////  Data Reconstruct  //////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
-void Data_Reconstruct(
+
+vector<PrimState> P(Nx_tot * Ny_tot);
+void Data_Reconstruct_PLM(
     const vector<ConsState>& U,
     vector<ConsState>& UL ,    vector<ConsState>& UR ,   
-    vector<ConsState>& UT ,    vector<ConsState>& UB)
+    vector<ConsState>& UT ,    vector<ConsState>& UB,
+    vector<PrimState>& PL ,    vector<PrimState>& PR ,   
+    vector<PrimState>& PT ,    vector<PrimState>& PB)
 {   
-    vector<PrimState> P(Nx_tot * Ny_tot);
     
     #pragma omp parallel for
     for (int i = 0; i < Nx_tot * Ny_tot; i++) {
         P[i] = ConsToPrim(U[i]);
     }
-
-    vector<PrimState> PL(Nx_tot * Ny_tot), PR(Nx_tot * Ny_tot), PT(Nx_tot * Ny_tot), PB(Nx_tot * Ny_tot);
     
-    #pragma omp parallel for
-    for (int i = 0; i < Nx_tot * Ny_tot; i++) {
-        PL[i] = P[i]; PR[i] = P[i];
-        PT[i] = P[i]; PB[i] = P[i];
-    }
-
+        // PLM
         // X Reconstruction
         #pragma omp parallel for collapse(2) 
-        for (int j = nghost-1; j < Ny_tot-nghost; j++) {
-            for (int i = nghost-1; i < Nx_tot-nghost; i++) {
+        for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
+            for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
                 int id    = idx(i, j);
                 int id_p1 = idx(i + 1, j);
                 int id_m1 = idx(i - 1, j);
                 
+                // Make it doing struct operator (s.rho ... )?
                 double s_rho = slope_Limiter((P[id].rho - P[id_m1].rho) * inv_dx, (P[id_p1].rho - P[id].rho) * inv_dx);
                 double s_u   = slope_Limiter((P[id].u   - P[id_m1].u  ) * inv_dx, (P[id_p1].u   - P[id].u  ) * inv_dx);
                 double s_v   = slope_Limiter((P[id].v   - P[id_m1].v  ) * inv_dx, (P[id_p1].v   - P[id].v  ) * inv_dx);
                 double s_P   = slope_Limiter((P[id].P   - P[id_m1].P  ) * inv_dx, (P[id_p1].P   - P[id].P  ) * inv_dx);
 
-                PR[id].rho = P[id].rho + 0.5 * dx * s_rho;
-                PR[id].u   = P[id].u   + 0.5 * dx * s_u;
-                PR[id].v   = P[id].v   + 0.5 * dx * s_v;
-                PR[id].P   = P[id].P   + 0.5 * dx * s_P;
+                PrimState pr, pl;
 
-                PL[id].rho = P[id].rho - 0.5 * dx * s_rho;
-                PL[id].u   = P[id].u   - 0.5 * dx * s_u;
-                PL[id].v   = P[id].v   - 0.5 * dx * s_v;
-                PL[id].P   = P[id].P   - 0.5 * dx * s_P;
+                pr.rho = P[id].rho + 0.5 * dx * s_rho; 
+                pr.u   = P[id].u   + 0.5 * dx * s_u;
+                pr.v   = P[id].v   + 0.5 * dx * s_v;
+                pr.P   = P[id].P   + 0.5 * dx * s_P;
+                    
+                pl.rho = P[id].rho - 0.5 * dx * s_rho;
+                pl.u   = P[id].u   - 0.5 * dx * s_u;
+                pl.v   = P[id].v   - 0.5 * dx * s_v;
+                pl.P   = P[id].P   - 0.5 * dx * s_P;
+                
+                pr.rho = max(pr.rho, rho_f); pr.P = max(pr.P, P_f);
+                pl.rho = max(pl.rho, rho_f); pl.P = max(pl.P, P_f);
+
+                UR[id] = PrimToCons(pr);
+                UL[id] = PrimToCons(pl);
             }
         }
 
         // Y Reconstruction
         #pragma omp parallel for collapse(2) 
-        for (int j = nghost-1; j < Ny_tot-nghost; j++) {
-            for (int i = nghost-1; i < Nx_tot-nghost; i++) {
+        for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
+            for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
                 int id    = idx(i, j);
                 int id_p1 = idx(i, j + 1);
                 int id_m1 = idx(i, j - 1);
@@ -343,19 +352,127 @@ void Data_Reconstruct(
                 double s_v   = slope_Limiter((P[id].v   - P[id_m1].v  ) * inv_dy, (P[id_p1].v   - P[id].v  ) * inv_dy);
                 double s_P   = slope_Limiter((P[id].P   - P[id_m1].P  ) * inv_dy, (P[id_p1].P   - P[id].P  ) * inv_dy);
 
-                PT[id].rho = P[id].rho + 0.5 * dy * s_rho;
-                PT[id].u   = P[id].u   + 0.5 * dy * s_u;
-                PT[id].v   = P[id].v   + 0.5 * dy * s_v;
-                PT[id].P   = P[id].P   + 0.5 * dy * s_P;
+                PrimState pt, pb;
+                pt.rho = P[id].rho + 0.5 * dy * s_rho; 
+                pt.u   = P[id].u   + 0.5 * dy * s_u;
+                pt.v   = P[id].v   + 0.5 * dy * s_v;
+                pt.P   = P[id].P   + 0.5 * dy * s_P;
+                    
+                pb.rho = P[id].rho - 0.5 * dy * s_rho;
+                pb.u   = P[id].u   - 0.5 * dy * s_u;
+                pb.v   = P[id].v   - 0.5 * dy * s_v;
+                pb.P   = P[id].P   - 0.5 * dy * s_P;
 
-                PB[id].rho = P[id].rho - 0.5 * dy * s_rho;
-                PB[id].u   = P[id].u   - 0.5 * dy * s_u;
-                PB[id].v   = P[id].v   - 0.5 * dy * s_v;
-                PB[id].P   = P[id].P   - 0.5 * dy * s_P;
+                pt.rho = max(pt.rho, rho_f); pt.P = max(pt.P, P_f);
+                pb.rho = max(pb.rho, rho_f); pb.P = max(pb.P, P_f);
+                
+                UT[id] = PrimToCons(pt);
+                UB[id] = PrimToCons(pb);
             }
         }
+
+}
+//===========================================================================
+// PPM
+void Data_Reconstruct_PPM(
+    const vector<ConsState>& U,
+    vector<ConsState>& UL ,    vector<ConsState>& UR ,   
+    vector<ConsState>& UT ,    vector<ConsState>& UB,
+    vector<PrimState>& PL ,    vector<PrimState>& PR ,   
+    vector<PrimState>& PT ,    vector<PrimState>& PB)
+{   
     
-    // Convert to ConsState
+    #pragma omp parallel for
+    for (int i = 0; i < Nx_tot * Ny_tot; i++) {
+        P[i] = ConsToPrim(U[i]);
+    }
+    #pragma omp parallel for collapse(2) 
+    for (int j = nghost; j < Ny_tot - nghost; j++) {
+        for (int i = nghost - 1; i <= Nx_tot - nghost; i++) {
+            int id    = idx(i, j);
+            int id_p1 = idx(i + 1, j);
+            int id_p2 = idx(i + 2, j);
+            int id_m1 = idx(i - 1, j);
+            int id_m2 = idx(i - 2, j);
+            double P_r_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+            double P_r_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+            double P_r_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+            double P_r_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+
+            double P_l_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+            double P_l_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+            double P_l_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+            double P_l_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+
+            auto monetize = [](double L, double R, double C) -> pair<double, double> {
+                        // local maxinmum , Const
+                        if ((R - C) * (C - L) <= 0.0) {
+                            L = C; R = C;
+                        } else {
+                            double dP = R - L;
+                            double P6 = 6.0 * (C - 0.5 * (L + R));
+                            // Over
+                            if (dP * P6 > dP * dP) {
+                                L = 3.0 * C - 2.0 * R;
+                            } else if (dP * P6 < -dP * dP) {
+                                R = 3.0 * C - 2.0 * L;
+                            }
+                        }
+                        return {L, R};
+            };
+            auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, P[id].rho);
+            auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   P[id].u);
+            auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   P[id].v);
+            auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   P[id].P);
+
+            PL[id] = {rho_L, u_L, v_L, P_L};
+            PR[id] = {rho_R, u_R, v_R, P_R};
+        }   
+    }
+    #pragma omp parallel for collapse(2) 
+    for (int j = nghost - 1; j <= Ny_tot - nghost; j++) {
+        for (int i = nghost; i < Nx_tot - nghost; i++) {
+            int id    = idx(i, j);
+            int id_p1 = idx(i, j + 1);
+            int id_p2 = idx(i, j + 2);
+            int id_m1 = idx(i, j - 1);
+            int id_m2 = idx(i, j - 2);
+
+            // --- 步驟 A：四階內插求交界面初估值 ---
+            double P_t_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+            double P_t_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+            double P_t_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+            double P_t_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+
+            double P_b_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+            double P_b_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+            double P_b_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+            double P_b_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+            auto monetize = [](double L, double R, double C) -> pair<double, double> {
+                if ((R - C) * (C - L) <= 0.0) {
+                    L = C; R = C;
+                } else {
+                    double dP = R - L;
+                    double P6 = 6.0 * (C - 0.5 * (L + R));
+                    if (dP * P6 > dP * dP) {
+                        L = 3.0 * C - 2.0 * R;
+                    } else if (dP * P6 < -dP * dP) {
+                        R = 3.0 * C - 2.0 * L;
+                    }
+                }
+                return {L, R};
+            };
+
+            auto [rho_B, rho_T] = monetize(P_b_rho, P_t_rho, P[id].rho);
+            auto [u_B, u_T]     = monetize(P_b_u,   P_t_u,   P[id].u);
+            auto [v_B, v_T]     = monetize(P_b_v,   P_t_v,   P[id].v);
+            auto [P_B, P_T]     = monetize(P_b_P,   P_t_P,   P[id].P);
+
+            PB[id] = {rho_B, u_B, v_B, P_B};
+            PT[id] = {rho_T, u_T, v_T, P_T};
+        }
+    }
+
     #pragma omp parallel for
     for (int i = 0; i < Nx_tot * Ny_tot; i++) {
         PL[i].rho = max(PL[i].rho, rho_f); PL[i].P = max(PL[i].P, P_f);
@@ -370,7 +487,6 @@ void Data_Reconstruct(
     }
 
 }
-
 ////////////////////////////////////////////////////////////////////////////
 ///////////////////////////  Boundary  /////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////
@@ -390,10 +506,10 @@ void Apply_Boundary(vector<ConsState>& U) {
             U[idx(Nx_tot -  nghost + g,j)] = U[idx(Nx_tot - nghost - 1, j)];
         }
     }
-
 }
 //===========================================================================
 inline ConsState HLLC_Flux(const ConsState& UL_state, const ConsState& UR_state, char direction) {
+    
     PrimState PL = ConsToPrim(UL_state);
     PrimState PR = ConsToPrim(UR_state);
 
@@ -448,39 +564,61 @@ inline ConsState HLLC_Flux(const ConsState& UL_state, const ConsState& UR_state,
         }
     }
 }
+
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////  PDE Operator  ////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
-void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt  ){
-    vector<ConsState> UL(Nx_tot * Ny_tot) , UR(Nx_tot * Ny_tot) , UT(Nx_tot * Ny_tot) , UB(Nx_tot * Ny_tot);
-    vector<ConsState> Flux_x(Nx_tot * Ny_tot) , Flux_y(Nx_tot * Ny_tot);
+vector<PrimState> PL(Nx_tot * Ny_tot) , PR(Nx_tot * Ny_tot) , PT(Nx_tot * Ny_tot) , PB(Nx_tot * Ny_tot);
 
-double t_start = omp_get_wtime();
+void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt,  
+    vector<ConsState>& UL,      vector<ConsState>& UR,
+    vector<ConsState>& UT,      vector<ConsState>& UB,
+    vector<ConsState>& Flux_x,  vector<ConsState>& Flux_y){
+    
+    //===========================================================================
     // 1 : data reconstruction | 0.035 s
-    Data_Reconstruct(U,UL,UR,UT,UB);
-double t_end = omp_get_wtime();
-total_calc_time = (t_end - t_start);
-cout << " Flux " << total_calc_time << " s" << endl;
+
+    double t_start1 = omp_get_wtime();
+
+    // Data_Reconstruct_PLM(U,UL,UR,UT,UB,PL,PR,PT,PB);
+    Data_Reconstruct_PPM(U,UL,UR,UT,UB,PL,PR,PT,PB);
+
+    double t_end1 = omp_get_wtime();
+    double total_calc_time1 = (t_end1 - t_start1);
+    
+    //===========================================================================
     // 2 : Flux 
     
-    // X | 0.2 s 
+    // X | 0.006 s 
+    // Try giving whole matrix into HLLC one
+
+    // double t_start2 = omp_get_wtime();
+
     #pragma omp parallel for collapse(2)
     for (int j = nghost; j < Ny_tot-nghost; j++) {
         for (int i = nghost; i <= Nx_tot-nghost; i++) {
             Flux_x[idx(i, j)] = HLLC_Flux(UR[idx(i-1, j)], UL[idx(i, j)], 'x');
-            Flux_y[idx(j, i)] = HLLC_Flux(UT[idx(j, i-1)], UB[idx(j, i)], 'y');
+            // Flux_y[idx(j, i)] = HLLC_Flux(UT[idx(j, i-1)], UB[idx(j, i)], 'y');
+            // HLLC_Flux(UR[idx(i-1, j)], UL[idx(i, j)], 'x',Flux_x[idx(i, j)]);
         }
     }
+
+    // double t_end2 = omp_get_wtime();
+    // double total_calc_time2 = (t_end2 - t_start2);
     //===========================================================================
     // Y
-    // #pragma omp parallel for collapse(2)
-    // for (int j = nghost; j <= Ny_tot-nghost; j++) {
-    //     for (int i = nghost; i < Nx_tot-nghost; i++) {
-    //             Flux_y[idx(i, j)] = HLLC_Flux(UT[idx(i, j-1)], UB[idx(i, j )], 'y');
-    //     }
-    // }
+    #pragma omp parallel for collapse(2)
+    for (int j = nghost; j <= Ny_tot-nghost; j++) {
+        for (int i = nghost; i < Nx_tot-nghost; i++) {
+            Flux_y[idx(i, j)] = HLLC_Flux(UT[idx(i, j-1)], UB[idx(i, j )], 'y');
+            // HLLC_Flux(UT[idx(i, j-1)], UB[idx(i, j )], 'y', Flux_y[idx(i, j)] );
+        }
+    }
 
+    //===========================================================================
     // 3: dU/dt | 0.17 s
+
+    // double t_start3 = omp_get_wtime();
 
     #pragma omp parallel for collapse(2)
     for (int j = nghost; j < Ny_tot-nghost; j++) {
@@ -493,7 +631,12 @@ cout << " Flux " << total_calc_time << " s" << endl;
         }
     }
 
+    // double t_end3 = omp_get_wtime();
+    // double total_calc_time3 = (t_end3 - t_start3);
 
+    cout << "  Data Rec = " << total_calc_time1 << " s" << endl;
+    // cout << "  Flux X   = " << total_calc_time2 << " s" << endl;
+    // cout << "  DU / Dt  = " << total_calc_time3 << " s" << endl;
 }    
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////  RK4 Solver  //////////////////////////////////
@@ -501,34 +644,30 @@ cout << " Flux " << total_calc_time << " s" << endl;
 
 /////////////////////////////////////////////////////////////////////////////
 // RK2
+vector<ConsState> k1(Nx_tot * Ny_tot );
+vector<ConsState> k2(Nx_tot * Ny_tot);
+// vector<ConsState> U_pred(Nx_tot * Ny_tot);
+vector<ConsState> UL(Nx_tot * Ny_tot) , UR(Nx_tot * Ny_tot) , UT(Nx_tot * Ny_tot) , UB(Nx_tot * Ny_tot);
+vector<ConsState> Flux_x(Nx_tot * Ny_tot) , Flux_y(Nx_tot * Ny_tot);
+
 void RK2_Step(const vector<ConsState>& Un, vector<ConsState>& Unext, double dt) {
-    vector<ConsState> k1(Nx_tot * Ny_tot );
-    vector<ConsState> k2(Nx_tot * Ny_tot);
-    vector<ConsState> U_pred(Nx_tot * Ny_tot);
-    omp_set_nested(1);
     
     // Riemman Solver 0.08s
-    Euler_Riemann_Operator(Un, k1);
+    Euler_Riemann_Operator(Un, k1,UL,UR,UT,UB,Flux_x,Flux_y);
 
     #pragma omp parallel for
     for (int i = 0; i < Nx_tot * Ny_tot; i++) {
-        U_pred[i] = Un[i] + k1[i] * dt;
+        Unext[i] = Un[i] + k1[i] * dt;
     }
 
-    Apply_Boundary(U_pred);
+    Apply_Boundary(Unext);
 
-    Euler_Riemann_Operator(U_pred, k2);
+    Euler_Riemann_Operator(Unext, k2,UL,UR,UT,UB,Flux_x,Flux_y);
 
     // Floor check 0.001s
     #pragma omp parallel for
     for (int i = 0; i < Nx_tot * Ny_tot; i++) {
         Unext[i] = Un[i] + (k1[i] + k2[i]) * 0.5 * dt;
-        if(Unext[i].rho < 0) {
-            Unext[i].rho = rho_f ;
-        }
-        if(Unext[i].E < 0) {
-            Unext[i].E = rho_f ;
-        }
     }
 
     Apply_Boundary(Unext);
@@ -536,22 +675,22 @@ void RK2_Step(const vector<ConsState>& Un, vector<ConsState>& Unext, double dt) 
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// Euler
-void Euler_Step(
-    const vector<ConsState>& Un, 
-    vector<ConsState>& Unext,
-    vector<ConsState>& k1, 
-    double dt) 
-{
-    Euler_Riemann_Operator(Un, k1);
+// // Euler
+// void Euler_Step(
+//     const vector<ConsState>& Un, 
+//     vector<ConsState>& Unext,
+//     vector<ConsState>& k1, 
+//     double dt) 
+// {
+//     Euler_Riemann_Operator(Un, k1);
 
-    #pragma omp parallel for
-    for (int i = 0; i < Nx_tot * Ny_tot; i++) {
-        Unext[i] = Un[i] + k1[i] * dt;
-    }
+//     #pragma omp parallel for
+//     for (int i = 0; i < Nx_tot * Ny_tot; i++) {
+//         Unext[i] = Un[i] + k1[i] * dt;
+//     }
     
-    Apply_Boundary(Unext);
-}
+//     Apply_Boundary(Unext);
+// }
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////  Main  ////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
@@ -569,15 +708,21 @@ int main(){
     Apply_Boundary(u0);
 
     vector<ConsState> u_next(Nx_tot * Ny_tot) ;
+    double t_start = omp_get_wtime();
+
     for (int step=1 ; step <= total_step ; step++){
 
-        double t_start = omp_get_wtime();
         double dt = Get_CFL_Dt(u0);
 
         t += dt;
 
+        // double t_start = omp_get_wtime();
+
         // Euler_Step(u0, u_next, k1,dt);
         RK2_Step(u0,u_next,dt);
+
+        // double t_end = omp_get_wtime();
+        // total_calc_time += (t_end - t_start);
 
         // check Nan then break
         // auto it = std::find_if(u_next.begin(), u_next.end(), [](const ConsState& s) {
@@ -591,38 +736,39 @@ int main(){
 
         u0.swap(u_next);
 
-        double t_end = omp_get_wtime();
-        total_calc_time += (t_end - t_start);
-
-        // u0=u_next;
         // Apply_Boundary(u0);
 
         // Output
-        // if (step % Estep == 0) {
-        //     char buffer[50];
-        //     std::snprintf(buffer, sizeof(buffer), "%04d", step / Estep);
-        //     std::string stepStr = buffer;
-
+        if (step % Estep == 0) {
+            char buffer[50];
+            std::snprintf(buffer, sizeof(buffer), "%04d", step / Estep);
+            std::string stepStr = buffer;
+            
+            double t_end = omp_get_wtime();
+            total_calc_time += (t_end - t_start);
+            
             cout << "==========================================================" << endl;
             cout << " Simulation Time = " << t << " , dt = " << dt << endl;
             cout << "            Step = " << step << " | Center density rho = " << u0[idx(Nx_tot/2,Ny_tot/2)].rho << endl;
-            cout << "       Real Time = " << total_calc_time << " s | Spend Time = " << t_end - t_start << " s" << endl;
+            cout << "       Real Time = " << total_calc_time << " s | RK2 Spend Time = " << t_end - t_start << " s" << endl;
 
-        //     string Fname = "Final.csv";
-        //     ofstream outFile("../" + Dir + "/"+ prob + "/" + prob + "_" + stepStr + "_" + Fname);
-        //     outFile << "t,x,y,rho,mu,mv,E,u,v,P\n";
-        //     for (int i=nghost ; i < Nx+nghost ; i++){
-        //         for (int j=nghost ; j < Ny+nghost ; j++){
+            string Fname = "Final.csv";
+            ofstream outFile("../" + Dir + "/"+ prob + "/" + prob + "_" + stepStr + "_" + Fname);
+            outFile << "t,x,y,rho,mu,mv,E,u,v,P\n";
+            for (int i=nghost ; i < Nx+nghost ; i++){
+                for (int j=nghost ; j < Ny+nghost ; j++){
 
-        //             PrimState P = ConsToPrim(u0[idx(i,j)]);
-        //             outFile << t               << " , ";
-        //             outFile << x[i]            << " , " << y[j]            << " , " << u0[idx(i,j)].rho  << " , ";
-        //             outFile << u0[idx(i,j)].mu << " , " << u0[idx(i,j)].mv << " , " << u0[idx(i,j)].E    << " , "; 
-        //             outFile << P.u             << " , " << P.v             << " , " << P.P               << '\n' ;
-        //         }
-        //     }
-        //     outFile.close();
-        // }
+                    PrimState P = ConsToPrim(u0[idx(i,j)]);
+                    outFile << t               << " , ";
+                    outFile << x[i]            << " , " << y[j]            << " , " << u0[idx(i,j)].rho  << " , ";
+                    outFile << u0[idx(i,j)].mu << " , " << u0[idx(i,j)].mv << " , " << u0[idx(i,j)].E    << " , "; 
+                    outFile << P.u             << " , " << P.v             << " , " << P.P               << '\n' ;
+                }
+            }
+            outFile.close();
+            t_start = omp_get_wtime();
+        }
+        
         // initial value
         // for(int j = nghost ; j < Ny_tot-nghost; j++){
         //     for(int i = nghost ; i < Nx_tot-nghost ; i++){
