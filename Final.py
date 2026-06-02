@@ -8,7 +8,7 @@
 #
 # Numerical method:
 #   Time integration        : RK4
-#   Spatial reconstruction : PPM-like reconstruction on primitive variables
+#   Spatial reconstruction  : PPM-like reconstruction on primitive variables
 #   Interface flux          : Rusanov / local Lax-Friedrichs flux
 #   Boundary condition      : outflow for hydrodynamics
 #   Gravity                 : periodic FFT Poisson solver sourced by rho-rho_mean
