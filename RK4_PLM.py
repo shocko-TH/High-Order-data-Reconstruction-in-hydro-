@@ -5,6 +5,8 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+from datetime import datetime
 
 #--------------------------------------------
 # Parameters
@@ -468,6 +470,7 @@ t = 0.0
 U, x, y = SetInitialCondition()
 
 step = 0
+frame_count = 0
 
 # store snapshots for animation
 snapshots = []
@@ -476,10 +479,27 @@ shock_radii = []
 output_interval = 0.002
 next_output_time = 0.0
 
-while t < end_time:
-    dt = ComputeTimestep( U[nghost:Nx-nghost,nghost:Ny-nghost,:], t )
+# output direction
+current_dir = os.getcwd() 
+session_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+text_dir = os.path.join(current_dir, "test_data", "text_output")
+fig_session_dir = os.path.join(current_dir, "test_data", "fig", session_time_str)
+os.makedirs(text_dir, exist_ok=True)
+os.makedirs(fig_session_dir, exist_ok=True)
 
-    print( "step = %5d, t = %13.7e --> %13.7e, dt = %13.7e" % (step,t,t+dt,dt) )
+log_file_path = os.path.join(text_dir, f"{session_time_str}.txt")
+def log_and_print(message_string):
+    print(message_string)
+    with open(log_file_path, "a", encoding="utf-8") as log_file:
+        log_file.write(message_string + "\n")
+
+log_and_print(f"=== printed text will be saved with filename: {session_time_str} ===")
+
+while t < end_time:
+    dt = ComputeTimestep( U, t )
+
+    step_log = "step = %5d, t = %13.7e --> %13.7e, dt = %13.7e" % (step, t, t+dt, dt)
+    log_and_print(step_log)
 
     Update( U, dt )
     t += dt
@@ -494,9 +514,29 @@ while t < end_time:
         snapshot_times.append( t )
         shock_radii.append( Rshock )
 
-        print( "    save frame: t = %10.5e, shock radius ~ %10.5e" % (t,Rshock) )
+        frame_log = "    save frame: t = %10.5e, shock radius ~ %10.5e" % (t, Rshock)
+        log_and_print(frame_log)
 
+        tmp_fig, tmp_ax = plt.subplots(dpi=100)        
+        tmp_img = tmp_ax.imshow( np.log10(rho_now.T), origin='lower',
+                                extent=[-0.5*Lx, 0.5*Lx, -0.5*Ly, 0.5*Ly],
+                                aspect='equal', cmap='jet' )
+        
+        tmp_ax.set_title( f"Sedov Density Map (t = {t:.4f})" )
+        tmp_ax.set_xlabel('x')
+        tmp_ax.set_ylabel('y')
+        plt.colorbar(tmp_img, ax=tmp_ax, label='log10 density')
+        
+        png_filename = f"{frame_count:02d}.png"
+        png_filepath = os.path.join(fig_session_dir, png_filename)
+        
+        tmp_fig.savefig(png_filepath, bbox_inches='tight')
+        plt.close(tmp_fig)
+        
+        frame_count += 1
         next_output_time += output_interval
+
+log_and_print(f"=== log has been saved ===")
 
 
 #--------------------------------------------------------------------
@@ -541,5 +581,8 @@ ani = animation.FuncAnimation( fig, AnimateFrame,
                                interval=80, blit=True )
 
 # Save animation. GIF is easiest to open.
-ani.save( 'sedov_density_wavefront.gif', writer='pillow', fps=12 )
+gif_parent_dir = os.path.dirname(fig_session_dir)
+gif_filepath = os.path.join(gif_parent_dir, f"{session_time_str}.gif")
+
+ani.save( gif_filepath, writer='pillow', fps=12 )
 print( 'Animation saved as sedov_density_wavefront.gif' )
