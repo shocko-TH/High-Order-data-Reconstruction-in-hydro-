@@ -8,9 +8,9 @@
 #
 # Numerical method:
 #   Time integration        : RK4
-#   Spatial reconstruction : PPM-like reconstruction on primitive variables
-#   Interface flux          : Rusanov / local Lax-Friedrichs flux
-#   Boundary condition      : outflow for hydrodynamics
+#   Spatial reconstruction  : basic PPM reconstruction on primitive variables
+#   Interface flux          : HLLC approximate Riemann solver
+#   Boundary condition      : periodic for hydrodynamics
 #   Gravity                 : periodic FFT Poisson solver sourced by rho-rho_mean
 #
 # Important modeling choice:
@@ -36,7 +36,7 @@ nghost = 3
 
 gamma = 5.0 / 3.0
 cfl = 0.35
-end_time = 0.2
+end_time = 0.1
 ## critical 0.15
 output_interval = 0.0025
 
@@ -49,7 +49,7 @@ r_blast = 0.03      # radius of central energy injection region
 # Self-gravity switch
 # True means shock-compressed density sources Phi through Poisson equation.
 USE_SELF_GRAVITY = True
-Ggrav = 500.0        # gravitational constant in code units; increase carefully
+Ggrav = 5.0        # gravitational constant in code units; increase carefully
 
 # Numerical floors
 rho_floor = 1.0e-12
@@ -113,11 +113,14 @@ def apply_floors(U):
 # =============================================================================
 # Boundary condition
 # =============================================================================
-def apply_outflow_boundary(U):
-    U[:nghost, :, :] = U[nghost:nghost+1, :, :]
-    U[Nx-nghost:, :, :] = U[Nx-nghost-1:Nx-nghost, :, :]
-    U[:, :nghost, :] = U[:, nghost:nghost+1, :]
-    U[:, Ny-nghost:, :] = U[:, Ny-nghost-1:Ny-nghost, :]
+def apply_periodic_boundary(U):
+    # x direction
+    U[:nghost, :, :] = U[Nx-2*nghost:Nx-nghost, :, :]
+    U[Nx-nghost:, :, :] = U[nghost:2*nghost, :, :]
+
+    # y direction
+    U[:, :nghost, :] = U[:, Ny-2*nghost:Ny-nghost, :]
+    U[:, Ny-nghost:, :] = U[:, nghost:2*nghost, :]
 
 # =============================================================================
 # Fluxes
@@ -161,33 +164,166 @@ def rusanov_flux_y(UL, UR):
     a = np.maximum(np.abs(WL[..., 2]) + cL, np.abs(WR[..., 2]) + cR)
     return 0.5 * (flux_y(UL) + flux_y(UR)) - 0.5 * a[..., None] * (UR - UL)
 
+
+# =============================================================================
+# HLLC approximate Riemann solver
+# =============================================================================
+def _hllc_flux_normal(UL, UR, direction="x"):
+    """Vectorized HLLC flux for the Euler equations.
+
+    Parameters
+    ----------
+    UL, UR : ndarray (..., 4)
+        Left and right conserved states at each interface.
+    direction : {"x", "y"}
+        Normal direction of the interface.
+
+    Notes
+    -----
+    HLLC resolves the contact wave, unlike Rusanov/LLF. This usually gives
+    sharper Sedov shells and less diffusion in contact discontinuities.
+    """
+    WL = conserved_to_primitive(UL)
+    WR = conserved_to_primitive(UR)
+
+    rhoL = np.maximum(WL[..., 0], rho_floor)
+    rhoR = np.maximum(WR[..., 0], rho_floor)
+    uL, vL, pL = WL[..., 1], WL[..., 2], np.maximum(WL[..., 3], P_floor)
+    uR, vR, pR = WR[..., 1], WR[..., 2], np.maximum(WR[..., 3], P_floor)
+
+    if direction == "x":
+        unL, utL = uL, vL
+        unR, utR = uR, vR
+        FL = flux_x(UL)
+        FR = flux_x(UR)
+    elif direction == "y":
+        unL, utL = vL, uL
+        unR, utR = vR, uR
+        FL = flux_y(UL)
+        FR = flux_y(UR)
+    else:
+        raise ValueError("direction must be 'x' or 'y'")
+
+    cL = np.sqrt(gamma * pL / rhoL)
+    cR = np.sqrt(gamma * pR / rhoR)
+
+    # Davis wave-speed estimate. It is robust and works well as a first HLLC
+    # replacement for Rusanov in strong-shock tests.
+    SL = np.minimum(unL - cL, unR - cR)
+    SR = np.maximum(unL + cL, unR + cR)
+
+    denom = rhoL * (SL - unL) - rhoR * (SR - unR)
+    denom = np.where(np.abs(denom) > 1.0e-30, denom, np.sign(denom + 1.0e-300) * 1.0e-30)
+    SM = (
+        pR - pL
+        + rhoL * unL * (SL - unL)
+        - rhoR * unR * (SR - unR)
+    ) / denom
+
+    pstarL = pL + rhoL * (SL - unL) * (SM - unL)
+    pstarR = pR + rhoR * (SR - unR) * (SM - unR)
+    pstar = np.maximum(0.5 * (pstarL + pstarR), P_floor)
+
+    def star_state(U, rho, un, ut, p, S):
+        factor = rho * (S - un) / np.where(
+            np.abs(S - SM) > 1.0e-30,
+            S - SM,
+            np.sign(S - SM + 1.0e-300) * 1.0e-30,
+        )
+
+        Ustar = np.empty_like(U)
+        Ustar[..., 0] = factor
+        if direction == "x":
+            Ustar[..., 1] = factor * SM
+            Ustar[..., 2] = factor * ut
+        else:
+            Ustar[..., 1] = factor * ut
+            Ustar[..., 2] = factor * SM
+
+        Ustar[..., 3] = (
+            (S - un) * U[..., 3]
+            - p * un
+            + pstar * SM
+        ) / np.where(
+            np.abs(S - SM) > 1.0e-30,
+            S - SM,
+            np.sign(S - SM + 1.0e-300) * 1.0e-30,
+        )
+        return Ustar
+
+    UstarL = star_state(UL, rhoL, unL, utL, pL, SL)
+    UstarR = star_state(UR, rhoR, unR, utR, pR, SR)
+
+    FstarL = FL + SL[..., None] * (UstarL - UL)
+    FstarR = FR + SR[..., None] * (UstarR - UR)
+
+    FHLLC = np.empty_like(UL)
+    mask_L = SL >= 0.0
+    mask_star_L = (SL < 0.0) & (SM >= 0.0)
+    mask_star_R = (SM < 0.0) & (SR > 0.0)
+    mask_R = SR <= 0.0
+
+    FHLLC[mask_L] = FL[mask_L]
+    FHLLC[mask_star_L] = FstarL[mask_star_L]
+    FHLLC[mask_star_R] = FstarR[mask_star_R]
+    FHLLC[mask_R] = FR[mask_R]
+
+    return FHLLC
+
+
+def hllc_flux_x(UL, UR):
+    return _hllc_flux_normal(UL, UR, direction="x")
+
+
+def hllc_flux_y(UL, UR):
+    return _hllc_flux_normal(UL, UR, direction="y")
+
 # =============================================================================
 # PPM-like reconstruction
 # =============================================================================
-def minmod(a, b):
-    return 0.5 * (np.sign(a) + np.sign(b)) * np.minimum(np.abs(a), np.abs(b))
-
-
 def ppm_reconstruct_1d(q):
-    """Return left/right interface states for a 1D array q.
-
-    qL_face[i] and qR_face[i] are states at interface i+1/2 from the left
-    cell i and the right cell i+1, respectively.
-    """
     n = q.size
-    slope = np.zeros(n)
-    slope[1:-1] = minmod(q[1:-1] - q[:-2], q[2:] - q[1:-1])
+    q_face = np.zeros(n + 1)
 
-    qL_cell = q - 0.5 * slope
-    qR_cell = q + 0.5 * slope
+    # fallback near boundaries
+    q_face[1:n] = 0.5 * (q[:-1] + q[1:])
+    q_face[0] = q[0]
+    q_face[n] = q[-1]
 
-    # Monotonicity limiter
-    qmin = np.minimum(q[:-1], q[1:])
-    qmax = np.maximum(q[:-1], q[1:])
-    left_state = np.clip(qR_cell[:-1], qmin, qmax)
-    right_state = np.clip(qL_cell[1:], qmin, qmax)
+    # 4th-order PPM face interpolation
+    for k in range(2, n - 1):
+        q_face[k] = (
+            7.0 / 12.0 * (q[k - 1] + q[k])
+            - 1.0 / 12.0 * (q[k - 2] + q[k + 1])
+        )
+
+    # interface monotonicity
+    for k in range(1, n):
+        qmin = min(q[k - 1], q[k])
+        qmax = max(q[k - 1], q[k])
+        q_face[k] = min(max(q_face[k], qmin), qmax)
+
+    qL = q_face[:-1].copy()
+    qR = q_face[1:].copy()
+
+    # parabolic monotonicity constraint
+    for i in range(n):
+        if (qR[i] - q[i]) * (q[i] - qL[i]) <= 0.0:
+            qL[i] = q[i]
+            qR[i] = q[i]
+        else:
+            dq = qR[i] - qL[i]
+            qa6 = 6.0 * (q[i] - 0.5 * (qL[i] + qR[i]))
+
+            if dq * qa6 > dq * dq:
+                qL[i] = 3.0 * q[i] - 2.0 * qR[i]
+            elif dq * qa6 < -dq * dq:
+                qR[i] = 3.0 * q[i] - 2.0 * qL[i]
+
+    left_state = qR[:-1].copy()
+    right_state = qL[1:].copy()
+
     return left_state, right_state
-
 
 def reconstruct_x(U):
     W = conserved_to_primitive(U)
@@ -211,12 +347,7 @@ def reconstruct_y(U):
 # =============================================================================
 # Optional self-gravity
 # =============================================================================
-def gravity_acceleration_fft_periodic(rho_real):
-    """Periodic FFT Poisson solver using density contrast rho-rho_mean.
-
-    This is a simple template. For an isolated cloud, an isolated-boundary
-    Poisson solver would be more physical than this periodic solver.
-    """
+def gravity_potential_fft_periodic(rho_real):
     rho_contrast = rho_real - np.mean(rho_real)
     rho_k = np.fft.fftn(rho_contrast)
 
@@ -229,8 +360,33 @@ def gravity_acceleration_fft_periodic(rho_real):
     mask = k2 > 0.0
     phi_k[mask] = -4.0 * np.pi * Ggrav * rho_k[mask] / k2[mask]
 
+    phi = np.real(np.fft.ifftn(phi_k))
+    return phi
+
+def gravity_acceleration_fft_periodic(rho_real):
+
+    rho_contrast = rho_real - np.mean(rho_real)
+
+    rho_k = np.fft.fftn(rho_contrast)
+
+    kx = 2.0 * np.pi * np.fft.fftfreq(Nx_In, d=dx)
+
+    ky = 2.0 * np.pi * np.fft.fftfreq(Ny_In, d=dy)
+
+    KX, KY = np.meshgrid(kx, ky, indexing="ij")
+
+    k2 = KX*KX + KY*KY
+
+    phi_k = np.zeros_like(rho_k, dtype=complex)
+
+    mask = k2 > 0.0
+
+    phi_k[mask] = -4.0 * np.pi * Ggrav * rho_k[mask] / k2[mask]
+
     gx = np.real(np.fft.ifftn(-1j * KX * phi_k))
+
     gy = np.real(np.fft.ifftn(-1j * KY * phi_k))
+
     return gx, gy
 
 
@@ -257,13 +413,13 @@ def gravity_source(U):
 def compute_rhs(U):
     Uwork = U.copy()
     Uwork = apply_floors(Uwork)
-    apply_outflow_boundary(Uwork)
+    apply_periodic_boundary(Uwork)
 
     ULx, URx = reconstruct_x(Uwork)
-    Fx = rusanov_flux_x(ULx, URx)
+    Fx = hllc_flux_x(ULx, URx)
 
     ULy, URy = reconstruct_y(Uwork)
-    Gy = rusanov_flux_y(ULy, URy)
+    Gy = hllc_flux_y(ULy, URy)
 
     rhs = np.zeros_like(Uwork)
     i0, i1 = nghost, Nx - nghost
@@ -280,12 +436,22 @@ def compute_rhs(U):
 
 def rk4_step(U, dt):
     k1 = compute_rhs(U)
-    k2 = compute_rhs(apply_floors(U + 0.5 * dt * k1))
-    k3 = compute_rhs(apply_floors(U + 0.5 * dt * k2))
-    k4 = compute_rhs(apply_floors(U + dt * k3))
+
+    U2 = apply_floors(U + 0.5 * dt * k1)
+    apply_periodic_boundary(U2)
+    k2 = compute_rhs(U2)
+
+    U3 = apply_floors(U + 0.5 * dt * k2)
+    apply_periodic_boundary(U3)
+    k3 = compute_rhs(U3)
+
+    U4 = apply_floors(U + dt * k3)
+    apply_periodic_boundary(U4)
+    k4 = compute_rhs(U4)
+
     Unew = U + (dt / 6.0) * (k1 + 2.0*k2 + 2.0*k3 + k4)
     Unew = apply_floors(Unew)
-    apply_outflow_boundary(Unew)
+    apply_periodic_boundary(Unew)
     return Unew
 
 
@@ -295,9 +461,22 @@ def compute_timestep(U, t):
     u = W[nghost:-nghost, nghost:-nghost, 1]
     v = W[nghost:-nghost, nghost:-nghost, 2]
     P = W[nghost:-nghost, nghost:-nghost, 3]
+
     cs = np.sqrt(gamma * P / rho)
     max_speed = np.max(np.maximum(np.abs(u) + cs, np.abs(v) + cs))
-    dt = cfl * min(dx, dy) / max(max_speed, 1.0e-30)
+    dt_hydro = cfl * min(dx, dy) / max(max_speed, 1.0e-30)
+
+    dt = dt_hydro
+
+    if USE_SELF_GRAVITY:
+        rho_real = U[nghost:-nghost, nghost:-nghost, 0]
+        gx, gy = gravity_acceleration_fft_periodic(rho_real)
+        gmax = np.max(np.sqrt(gx*gx + gy*gy))
+
+        if gmax > 1.0e-30:
+            dt_grav = np.sqrt(cfl * min(dx, dy) / gmax)
+            dt = min(dt, dt_grav)
+
     return min(dt, end_time - t)
 
 # =============================================================================
@@ -321,14 +500,14 @@ def set_initial_condition():
     W[nghost:-nghost, nghost:-nghost, :] = W_real
 
     U = primitive_to_conserved(W)
-    apply_outflow_boundary(U)
+    apply_periodic_boundary(U)
     return U
 
 
 def estimate_shock_radius(U, threshold=1.1):
     """Estimate shock radius from a density enhancement threshold.
 
-    The default threshold is mild because Rusanov flux spreads shocks.
+    The default threshold is mild because shocks are still spread over a few cells.
     This diagnostic does not affect the evolution.
     """
     rho = U[nghost:-nghost, nghost:-nghost, 0]
@@ -355,6 +534,46 @@ def radial_profile(quantity, nbins=80):
         prof[k] = np.mean(q[m]) if np.any(m) else np.nan
     return rc, prof
 
+def compute_thermal_energy(U):
+
+    W = conserved_to_primitive(U)
+
+    P = W[nghost:-nghost, nghost:-nghost, 3]
+
+    return np.sum(P / (gamma - 1.0)) * dx * dy
+
+def compute_kinetic_energy(U):
+
+    W = conserved_to_primitive(U)
+
+    rho = W[nghost:-nghost, nghost:-nghost, 0]
+
+    u = W[nghost:-nghost, nghost:-nghost, 1]
+
+    v = W[nghost:-nghost, nghost:-nghost, 2]
+
+    return np.sum(0.5 * rho * (u*u + v*v)) * dx * dy
+
+def compute_hydro_energy(U):
+
+    E = U[nghost:-nghost, nghost:-nghost, 3]
+
+    return np.sum(E) * dx * dy
+
+def compute_gravitational_energy(U):
+
+    if not USE_SELF_GRAVITY:
+
+        return 0.0
+
+    rho = U[nghost:-nghost, nghost:-nghost, 0]
+
+    rho_contrast = rho - np.mean(rho)
+
+    phi = gravity_potential_fft_periodic(rho)
+
+    return 0.5 * np.sum(rho_contrast * phi) * dx * dy
+
 # =============================================================================
 # Main run
 # =============================================================================
@@ -367,7 +586,13 @@ def main():
     times = []
     shock_radii = []
     sedov_radii = []
-
+    energy_times = []
+    thermal_hist = []
+    kinetic_hist = []
+    hydro_hist = []
+    grav_hist = []
+    total_hist = []
+    
     while t < end_time - 1.0e-14:
         dt = compute_timestep(U, t)
         U = rk4_step(U, dt)
@@ -379,7 +604,26 @@ def main():
             times.append(t)
             shock_radii.append(estimate_shock_radius(U))
             sedov_radii.append(sedov_radius_2d(t))
-            print(f"t={t:.5f}, dt={dt:.3e}, R_shock={shock_radii[-1]:.4f}, R_sedov~{sedov_radii[-1]:.4f}")
+
+            Etherm = compute_thermal_energy(U)
+            Ekin = compute_kinetic_energy(U)
+            Ehydro = compute_hydro_energy(U)
+            Egrav = compute_gravitational_energy(U)
+            Etot = Ehydro + Egrav
+            energy_times.append(t)
+            thermal_hist.append(Etherm)
+            kinetic_hist.append(Ekin)
+            hydro_hist.append(Ehydro)
+            grav_hist.append(Egrav)
+            total_hist.append(Etot)
+
+            print(
+                f"t={t:.5f}, dt={dt:.3e}, "
+                f"R_shock={shock_radii[-1]:.4f}, "
+                f"R_sedov~{sedov_radii[-1]:.4f}, "
+                f"Etot={Etot:.6e}"
+            )
+
             next_output += output_interval
 
     # Save shock radius diagnostic
@@ -388,6 +632,79 @@ def main():
         np.column_stack([times, shock_radii, sedov_radii]),
         header="time  measured_R_shock  Sedov_R_2D_xi_equals_1"
     )
+    energy_times = np.array(energy_times)
+    thermal_hist = np.array(thermal_hist)
+    kinetic_hist = np.array(kinetic_hist)
+    hydro_hist = np.array(hydro_hist)
+    grav_hist = np.array(grav_hist)
+    total_hist = np.array(total_hist)
+    np.savetxt(
+        "energy_diagnostic.txt",
+        np.column_stack([
+            energy_times,
+            thermal_hist,
+            kinetic_hist,
+            hydro_hist,
+            grav_hist,
+            total_hist
+        ]),
+        header="time thermal kinetic hydro gravitational total"
+)
+
+    plt.figure(figsize=(7, 5))
+
+    plt.plot(energy_times, total_hist, label="Total = Hydro + Gravity")
+
+    plt.plot(energy_times, hydro_hist, label="Hydro")
+
+    plt.plot(energy_times, grav_hist, label="Gravitational")
+
+    plt.xlabel("t")
+
+    plt.ylabel("Energy")
+
+    plt.legend()
+
+    plt.tight_layout()
+
+    plt.savefig("energy_total_hydro_gravity.png", dpi=180)
+
+    plt.close()
+
+    plt.figure(figsize=(7, 5))
+
+    plt.plot(energy_times, thermal_hist, label="Thermal")
+
+    plt.plot(energy_times, kinetic_hist, label="Kinetic")
+
+    plt.xlabel("t")
+
+    plt.ylabel("Energy")
+
+    plt.legend()
+
+    plt.tight_layout()
+
+    plt.savefig("energy_thermal_kinetic.png", dpi=180)
+
+    plt.close()
+
+    energy_error = (total_hist - total_hist[0]) / abs(total_hist[0])
+
+    plt.figure(figsize=(7, 5))
+
+    plt.plot(energy_times, energy_error)
+
+    plt.xlabel("t")
+
+    plt.ylabel("(E_total(t) - E_total(0)) / |E_total(0)|")
+
+    plt.tight_layout()
+
+    plt.savefig("energy_total_relative_error.png", dpi=180)
+
+    plt.close()
+
 
     # Plot final radial density profile
     rc, rho_prof = radial_profile(frames[-1])
@@ -439,10 +756,14 @@ def main():
         return im, title
 
     anim = FuncAnimation(fig, update_frame, frames=len(frames), interval=80, blit=False)
-    anim.save("sedov_selfgravity_RK4_PPM_density.gif", writer=PillowWriter(fps=12))
+    anim.save("sedov_selfgravity_RK4_PPM_HLLC_density.gif", writer=PillowWriter(fps=12))
     plt.close(fig)
 
-    print("Saved: sedov_selfgravity_RK4_PPM_density.gif")
+    print("Saved: energy_diagnostic.txt")
+    print("Saved: energy_total_hydro_gravity.png")
+    print("Saved: energy_thermal_kinetic.png")
+    print("Saved: energy_total_relative_error.png")
+    print("Saved: sedov_selfgravity_RK4_PPM_HLLC_density.gif")
     print("Saved: final_density_radial_profile.png")
     print("Saved: final_density_contrast_poisson_source.png")
     print("Saved: shock_radius_diagnostic.txt")
