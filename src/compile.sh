@@ -20,8 +20,11 @@ OMP_PATH="/opt/homebrew/opt/libomp"
 
 OUT=$(basename ${IN} .cpp).out
 
-${CC} ${version} ${OPENFLAG} ${IN} -o ${OUT}
+${CC} ${version} ${OPENFLAG} -O3 ${IN} -o ${OUT}
 # ${CC} ${FLAGS} ${IN} -o ${OUT}
 
-export OMP_NUM_THREADS=12
+export OMP_NUM_THREADS=16
 time ./${OUT}
+
+# echo ${IN}
+echo Threads = ${OMP_NUM_THREADS}
