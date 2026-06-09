@@ -33,18 +33,18 @@ using namespace std;
 // Change here to setting in another txt file ???
 
 // Grid set
-int         Nx = 512*2, Ny = 512*2 ;
+int         Nx = 512*1, Ny = 512*1 ;
 double      xmax = 0.5 , ymax = 0.5;
 int         nghost = 3 ;
 double      dx = 2*float(xmax)/float(Nx) , dy = 2*float(ymax)/float(Ny);
-string      Dir="Data" , prob="Euler_2D_PPM_KHI_1";
+string      Dir="Data" , prob="Euler_2D_PPM_KHI_test";
 
 const int   Nx_tot = Nx + 2 * nghost;
 const int   Ny_tot = Ny + 2 * nghost;
 
 double      dt=1e-1 , t=0;
-int         total_step  = 10000;
-const int   Estep  = 100;                            // saving data step
+int         total_step  = 1;
+const int   Estep  = 1;                            // saving data step
 double total_calc_time = 0.0;
 
 // Physics constant
@@ -281,7 +281,7 @@ void Initial_Value( vector<ConsState>& u0 ,vector<double>& x , vector<double>& y
     //     }
     // }
 
-#pragma omp parallel for collapse(2) 
+    #pragma omp parallel for collapse(2) 
     for (int j = 0; j < Ny_tot; j++) {
         for (int i = 0; i < Nx_tot; i++) {
             const int id = idx(i, j);
@@ -419,7 +419,7 @@ auto monetize = [](double L, double R, double C) -> pair<double, double> {
 void Data_Reconstruct_PPM(
     const vector<ConsState>& U,
     vector<ConsState>& UL ,    vector<ConsState>& UR ,   
-    vector<ConsState>& UT ,    vector<ConsState>& UB,
+    vector<ConsState>& UT ,    vector<ConsState>& UB ,
     vector<PrimState>& PL ,    vector<PrimState>& PR ,   
     vector<PrimState>& PT ,    vector<PrimState>& PB)
 {   
@@ -674,13 +674,14 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
 
 /////////////////////////////////////////////////////////////////////////////
 // RK2
-vector<ConsState> k1(Nx_tot * Ny_tot );
-vector<ConsState> k2(Nx_tot * Ny_tot);
-// vector<ConsState> U_pred(Nx_tot * Ny_tot);
-vector<ConsState> UL(Nx_tot * Ny_tot) , UR(Nx_tot * Ny_tot) , UT(Nx_tot * Ny_tot) , UB(Nx_tot * Ny_tot);
-vector<ConsState> Flux_x(Nx_tot * Ny_tot) , Flux_y(Nx_tot * Ny_tot);
 
 void RK2_Step(const vector<ConsState>& Un, vector<ConsState>& Unext, double dt) {
+    vector<ConsState> k1(Nx_tot * Ny_tot );
+    vector<ConsState> k2(Nx_tot * Ny_tot);
+
+    vector<ConsState> UL(Nx_tot * Ny_tot)     , UR(Nx_tot * Ny_tot) ;
+    vector<ConsState> UT(Nx_tot * Ny_tot)     , UB(Nx_tot * Ny_tot);
+    vector<ConsState> Flux_x(Nx_tot * Ny_tot) , Flux_y(Nx_tot * Ny_tot);
     
     // Riemman Solver 0.08s
     Euler_Riemann_Operator(Un, k1,UL,UR,UT,UB,Flux_x,Flux_y);
@@ -773,29 +774,37 @@ int main(){
             double t_end = omp_get_wtime();
             total_calc_time += (t_end - t_start);
 
-            // char buffer[50];
-            // std::snprintf(buffer, sizeof(buffer), "%04d", step / Estep);
-            // std::string stepStr = buffer;
-            
+            char buffer[50];
+            std::snprintf(buffer, sizeof(buffer), "%04d", step / Estep);
+            std::string stepStr = buffer;
+
+
+            double ts_io = omp_get_wtime();
+
+            string Fname = "Final.csv";
+            ofstream outFile("../" + Dir + "/"+ prob + "/" + prob + "_" + stepStr + "_" + Fname);
+            outFile << "t,x,y,rho,mu,mv,E,u,v,P\n";
+
+            for (int i=nghost ; i < Nx+nghost ; i++){
+                for (int j=nghost ; j < Ny+nghost ; j++){
+
+                    PrimState P = ConsToPrim(u0[idx(i,j)]);
+                    outFile << t               << " , ";
+                    outFile << x[i]            << " , " << y[j]            << " , " << u0[idx(i,j)].rho  << " , ";
+                    outFile << u0[idx(i,j)].mu << " , " << u0[idx(i,j)].mv << " , " << u0[idx(i,j)].E    << " , "; 
+                    outFile << P.u             << " , " << P.v             << " , " << P.P               << '\n' ;
+                }
+            }
+            outFile.close();
+            double te_io = omp_get_wtime();
+
             cout << "==========================================================\n";
             cout << " Simulation Time = " << t << " , dt = " << dt << endl;
             cout << "            Step = " << step << " | Center density rho = " << u0[idx(Nx_tot/2,Ny_tot/2)].rho << "\n";
             cout << "       Real Time = " << total_calc_time << " s | RK2 Spend Time = " << t_end - t_start << " s\n";
+            cout << "         IO Time = " << te_io - ts_io << "s\n";
+            cout << "              Nx = " << Nx << " , Ny = " << Ny << "\n";
 
-            // string Fname = "Final.csv";
-            // ofstream outFile("../" + Dir + "/"+ prob + "/" + prob + "_" + stepStr + "_" + Fname);
-            // outFile << "t,x,y,rho,mu,mv,E,u,v,P\n";
-            // for (int i=nghost ; i < Nx+nghost ; i++){
-            //     for (int j=nghost ; j < Ny+nghost ; j++){
-
-            //         PrimState P = ConsToPrim(u0[idx(i,j)]);
-            //         outFile << t               << " , ";
-            //         outFile << x[i]            << " , " << y[j]            << " , " << u0[idx(i,j)].rho  << " , ";
-            //         outFile << u0[idx(i,j)].mu << " , " << u0[idx(i,j)].mv << " , " << u0[idx(i,j)].E    << " , "; 
-            //         outFile << P.u             << " , " << P.v             << " , " << P.P               << '\n' ;
-            //     }
-            // }
-            // outFile.close();
             t_start = omp_get_wtime();
         }
         
