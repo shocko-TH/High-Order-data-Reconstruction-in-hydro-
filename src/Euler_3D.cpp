@@ -1,10 +1,10 @@
 ///////////////////////////////////////////////////////////////////
 /// 
-/// 2-dimensional Navier-Stokes Equation
-/// 
+/// 3-dimensional Euler Equations
+/// Author : TsungHsuan Chen - NTNU
 ///================================================================
 /// Notes :  
-/// 05/17 | Done | First try 3D NSE simulation.
+/// 05/17 | Done | First try 3D Euler simulation.
 ///              | 
 ///
 ///================================================================
@@ -31,11 +31,11 @@ using namespace std;
 /////////////////////////////////////////////////////////////////////////////
 // Change here to setting in another txt file ???
 
-const int     Nx = 64 , Ny = 64 , Nz = 64;
-const double  xmax = 1.0 , ymax = 1.0 ,zmax = 1.0;
+const int     Nx = 64*1 , Ny = 64*1 , Nz = 64;
+const double  xmax = 2.0 , ymax = 2.0 ,zmax = 1.0;
 const double  dx = 2*float(xmax)/Nx , dy = 2*float(ymax)/Ny , dz = 2*float(zmax)/Nz ;
 const int     nghost = 3 ;
-const string  Dir="Data" , prob = "Euler_3D_sed";
+const string  Dir="Data" , prob = "Euler_3D_KHI_PPM_v";
 
 
 const int   Nx_tot = Nx + 2 * nghost;
@@ -43,8 +43,8 @@ const int   Ny_tot = Ny + 2 * nghost;
 const int   Nz_tot = Nz + 2 * nghost;
 
 double      dt=1e-1 , t=0;
-int         total_step  = 1000;
-const int   Estep  = 10;                            // saving data step
+int         total_step  = 2000;
+const int   Estep  = 20;                            // saving data step
 double total_calc_time = 0.0;
 
 // Physics constant
@@ -201,23 +201,23 @@ inline ConsState Get_Flux(const ConsState& U , char T_v) {
 
     ConsState F;
     if (T_v == 'x'){
-        F.rho = U.mu;                     
-        F.mu  = U.mu * u + P;     
-        F.mv  = U.mv * u;    
-        F.mw  = U.mw * u;    
-        F.E   = (U.E + P) * u;   
+        F.rho = U.mu            ;                     
+        F.mu  = U.mu * u + P    ;     
+        F.mv  = U.mv * u        ;    
+        F.mw  = U.mw * u        ;    
+        F.E   = (U.E + P) * u   ;   
     }else if (T_v == 'y'){
-        F.rho = U.mv;                     
-        F.mu  = U.mu * v ;     
-        F.mv  = U.mv * v +P;    
-        F.mw  = U.mw * v;    
-        F.E   = (U.E + P) * v; 
+        F.rho = U.mv            ;                     
+        F.mu  = U.mu * v        ;     
+        F.mv  = U.mv * v + P    ;    
+        F.mw  = U.mw * v        ;    
+        F.E   = (U.E + P) * v   ; 
     }else{
-        F.rho = U.mw;                     
-        F.mu  = U.mu * w ;     
-        F.mv  = U.mv * w ;    
-        F.mw  = U.mw * w + P;    
-        F.E   = (U.E + P) * w; 
+        F.rho = U.mw            ;                     
+        F.mu  = U.mu * w        ;     
+        F.mv  = U.mv * w        ;    
+        F.mw  = U.mw * w + P    ;    
+        F.E   = (U.E + P) * w   ; 
     }
     return F;
 }
@@ -279,34 +279,83 @@ void Initial_Value( vector<ConsState>& u0 ,vector<double>& x , vector<double>& y
         if(filesystem::create_directory(dir_path)){cout << "Success build " << dir_path << endl;}
     };
 
+    // #   pragma omp parallel for collapse(3)
+    // for (int k=0 ; k<Nz_tot ; k++){
+    //     for (int j=0 ; j<Ny_tot ; j++){
+    //         for (int i=0 ; i<Nx_tot ; i++){
+    //             const int id = idx(i, j ,k);
+
+    //             // Initail condiction
+    //             double r = (x[i]*x[i] + y[j]*y[j] + z[k]*z[k]);
+    //             if(r < R * R){
+    //                 double P  = 100.0 ;
+    //                 double mu=0 , mv= 0;
+    //                 u0[id].rho = 10;
+    //                 u0[id].mu  = 0*u0[id].rho;
+    //                 u0[id].mv  = 0*u0[id].rho;
+    //                 u0[id].mw  = 0*u0[id].rho;
+    //                 // u0[id(i, j)].E   = P/(gam-1.0) ;
+    //                 u0[id].E   = 10*P/(gam - 1.0) + 0.5*(u0[id].mu * u0[id].mu + u0[id].mv * u0[id].mv + u0[id].mw * u0[id].mw)/u0[id].rho ;
+    //             }else{
+    //                 double P  = 0.10 ;
+    //                 u0[id].rho = 0.1;
+    //                 u0[id].mu  = 0*u0[id].rho;
+    //                 u0[id].mv  = 0*u0[id].rho;
+    //                 u0[id].mw  = 0*u0[id].rho;
+    //                 // u0[id(i, j)].E   = P/(gam-1.0);
+    //                 u0[id].E   = P/(gam - 1.0) + 0.5*(u0[id].mu * u0[id].mu + u0[id].mv * u0[id].mv+ u0[id].mw * u0[id].mw)/u0[id].rho ;
+    //             }
+    //         }
+    //     }    
+    // }
+    
     #   pragma omp parallel for collapse(3)
     for (int k=0 ; k<Nz_tot ; k++){
         for (int j=0 ; j<Ny_tot ; j++){
-            for (int i=0 ; i<Nx_tot ; i++){
-                const int id = idx(i, j ,k);
+            for (int i=0 ; i<Nx_tot ; i++){      
+            const int id = idx(i, j ,k );
+            double rho, u, v, w, P;
+            double ang = 45;
+            double rad = ang * M_PI / 180.0;
 
-                // Initail condiction
-                double r = (x[i]*x[i] + y[j]*y[j] + z[k]*z[k]);
-                if(r < R * R){
-                    double P  = 100.0 ;
-                    double mu=0 , mv= 0;
-                    u0[id].rho = 10;
-                    u0[id].mu  = 0*u0[id].rho;
-                    u0[id].mv  = 0*u0[id].rho;
-                    u0[id].mw  = 0*u0[id].rho;
-                    // u0[id(i, j)].E   = P/(gam-1.0) ;
-                    u0[id].E   = 10*P/(gam - 1.0) + 0.5*(u0[id].mu * u0[id].mu + u0[id].mv * u0[id].mv + u0[id].mw * u0[id].mw)/u0[id].rho ;
-                }else{
-                    double P  = 0.10 ;
-                    u0[id].rho = 0.1;
-                    u0[id].mu  = 0*u0[id].rho;
-                    u0[id].mv  = 0*u0[id].rho;
-                    u0[id].mw  = 0*u0[id].rho;
-                    // u0[id(i, j)].E   = P/(gam-1.0);
-                    u0[id].E   = P/(gam - 1.0) + 0.5*(u0[id].mu * u0[id].mu + u0[id].mv * u0[id].mv+ u0[id].mw * u0[id].mw)/u0[id].rho ;
-                }
+            // P = 2.5;
+            // rho= 10;
+            // u = 0;
+            // v = 0;
+            
+            // if (x[i]*x[i]+y[j]*y[j] <= 0.2) { 
+            //     w = 2;
+            // }else{
+            //     w=0;
+            // }
+
+            P  = 2.5; 
+            const double v0 = 1.0;
+
+            if (abs(z[k]) < 0.25) {
+                rho =  2.0 ;       
+                u   =  -v0 ;
+                v   =  0.0 ;
+            } else {
+                rho =  1.0 ;             
+                u   =  v0  ;
+                v   =  0   ;
+                // v   =  v0 * cos(rad) ;
+                // u   = v0 * cos(rad);     
+                // v   = v0 * sin(rad); 
             }
-        }    
+
+            double perturbation = 0.1 * sin(2.0 * M_PI * x[i] / (2.0 * xmax));
+            w = perturbation;
+            
+            u0[id].rho = rho;
+            u0[id].mu  = rho * u;
+            u0[id].mv  = rho * v;
+            u0[id].mw  = rho * w;
+            u0[id].E   = P / (gam - 1.0) + 0.5 * rho * (u * u + v * v + w * w);
+
+            }
+        }
     }
 
     char buffer[50];
@@ -339,15 +388,15 @@ void Initial_Value( vector<ConsState>& u0 ,vector<double>& x , vector<double>& y
 ///////////////////////////  Data Reconstruct  //////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
 vector<PrimState> P(Nx_tot * Ny_tot * Nz_tot);
+// vector<PrimState> PL(Nx_tot * Ny_tot * Nz_tot) , PR(Nx_tot * Ny_tot * Nz_tot) ;
+// vector<PrimState> PT(Nx_tot * Ny_tot * Nz_tot) , PB(Nx_tot * Ny_tot * Nz_tot) ;
+// vector<PrimState> PF(Nx_tot * Ny_tot * Nz_tot) , PBa(Nx_tot * Ny_tot * Nz_tot) ;
 
 void Data_Reconstruct_PLM(
     const vector<ConsState>& U,
     vector<ConsState>& UL ,    vector<ConsState>& UR ,   
     vector<ConsState>& UT ,    vector<ConsState>& UB ,
-    vector<ConsState>& UF ,    vector<ConsState>& UBa,
-    vector<PrimState>& PL ,    vector<PrimState>& PR ,   
-    vector<PrimState>& PT ,    vector<PrimState>& PB ,
-    vector<PrimState>& PF ,    vector<PrimState>& PBa )
+    vector<ConsState>& UF ,    vector<ConsState>& UBa)
 {   
     
     #pragma omp parallel for
@@ -468,6 +517,252 @@ void Data_Reconstruct_PLM(
             }
         }
     }
+}
+
+//===========================================================================
+// PPM
+
+auto monetize = [](double L, double R, double C) -> pair<double, double> {
+            // local maxinmum , Const
+            if ((R - C) * (C - L) <= 0.0) {
+                L = C; R = C;
+            } else {
+                double dP = R - L;
+                double P6 = 6.0 * (C - 0.5 * (L + R));
+                // Over
+                if (dP * P6 > dP * dP) {
+                    L = 3.0 * C - 2.0 * R;
+                } else if (dP * P6 < -dP * dP) {
+                    R = 3.0 * C - 2.0 * L;
+                }
+            }
+            return {L, R};
+};
+
+// void Data_Reconstruct_PPM(    
+//     const vector<ConsState>& U,
+//     vector<ConsState>& UL ,    vector<ConsState>& UR ,   
+//     vector<ConsState>& UT ,    vector<ConsState>& UB ,
+//     vector<ConsState>& UF ,    vector<ConsState>& UBa)
+// {   
+//     #pragma omp parallel for
+//     for (int i = 0; i < Nx_tot * Ny_tot * Nz_tot; i++) {
+//         P[i] = ConsToPrim(U[i]);
+//     }
+
+//     // X Reconstruction
+//     #pragma omp parallel for collapse(3) 
+//     for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
+//         for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
+//             for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
+//                 int id    = idx(i, j, k);
+//                 int id_p1 = idx(i + 1, j, k);
+//                 int id_p2 = idx(i + 2, j, k);
+//                 int id_m1 = idx(i - 1, j, k);
+//                 int id_m2 = idx(i - 2, j, k);
+
+//                 double P_r_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+//                 double P_r_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+//                 double P_r_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+//                 double P_r_w   = (7.0/12.0)*(P[id].w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
+//                 double P_r_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+
+//                 double P_l_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+//                 double P_l_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+//                 double P_l_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+//                 double P_l_w   = (7.0/12.0)*(P[id_m1].w   + P[id].w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
+//                 double P_l_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+
+//                 auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, P[id].rho);
+//                 auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   P[id].u);
+//                 auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   P[id].v);
+//                 auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   P[id].w);
+//                 auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   P[id].P);
+                
+//                 UL[id] = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
+//                 UR[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
+//             }
+//         }
+//     }
+
+//     // Y Reconstruction
+//     #pragma omp parallel for collapse(3) 
+//     for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
+//         for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
+//             for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
+//                 int id    = idx(i, j, k);
+//                 int id_p1 = idx(i , j + 1, k);
+//                 int id_p2 = idx(i , j + 2, k);
+//                 int id_m1 = idx(i , j - 1, k);
+//                 int id_m2 = idx(i , j - 2, k);
+
+//                 double P_r_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+//                 double P_r_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+//                 double P_r_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+//                 double P_r_w   = (7.0/12.0)*(P[id].w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
+//                 double P_r_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+
+//                 double P_l_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+//                 double P_l_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+//                 double P_l_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+//                 double P_l_w   = (7.0/12.0)*(P[id_m1].w   + P[id].w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
+//                 double P_l_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+
+//                 auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, P[id].rho);
+//                 auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   P[id].u);
+//                 auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   P[id].v);
+//                 auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   P[id].w);
+//                 auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   P[id].P);
+                
+//                 UT[id] = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
+//                 UB[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
+//             }
+//         }
+//     }
+
+//     // Z Reconstruction
+//     #pragma omp parallel for collapse(3) 
+//     for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
+//         for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
+//             for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
+//                 int id    = idx(i, j, k);
+//                 int id_p1 = idx(i , j , k + 1);
+//                 int id_p2 = idx(i , j , k + 2);
+//                 int id_m1 = idx(i , j , k - 1);
+//                 int id_m2 = idx(i , j , k - 2);
+
+//                 double P_r_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+//                 double P_r_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+//                 double P_r_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+//                 double P_r_w   = (7.0/12.0)*(P[id].w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
+//                 double P_r_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+
+//                 double P_l_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+//                 double P_l_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+//                 double P_l_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+//                 double P_l_w   = (7.0/12.0)*(P[id_m1].w   + P[id].w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
+//                 double P_l_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+
+//                 auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, P[id].rho);
+//                 auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   P[id].u);
+//                 auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   P[id].v);
+//                 auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   P[id].w);
+//                 auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   P[id].P);
+                
+//                 UF[id]  = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
+//                 UBa[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
+//             }
+//         }
+//     }
+
+// }
+
+void Data_Reconstruct_PPM(    
+    const vector<ConsState>& U,
+    vector<ConsState>& UL ,    vector<ConsState>& UR ,   
+    vector<ConsState>& UT ,    vector<ConsState>& UB ,
+    vector<ConsState>& UF ,    vector<ConsState>& UBa)
+{   
+    #pragma omp parallel for
+    for (int i = 0; i < Nx_tot * Ny_tot * Nz_tot; i++) {
+        P[i] = ConsToPrim(U[i]);
+    }
+
+    #pragma omp parallel for collapse(3) 
+    for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
+        for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
+            for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
+                
+                int id = idx(i, j, k);
+                PrimState p_center = P[id]; 
+
+                {
+                    int id_p1 = idx(i + 1, j, k);
+                    int id_p2 = idx(i + 2, j, k);
+                    int id_m1 = idx(i - 1, j, k);
+                    int id_m2 = idx(i - 2, j, k);
+
+                    double P_r_rho = (7.0/12.0)*(p_center.rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+                    double P_r_u   = (7.0/12.0)*(p_center.u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+                    double P_r_v   = (7.0/12.0)*(p_center.v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+                    double P_r_w   = (7.0/12.0)*(p_center.w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
+                    double P_r_P   = (7.0/12.0)*(p_center.P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+
+                    double P_l_rho = (7.0/12.0)*(P[id_m1].rho + p_center.rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+                    double P_l_u   = (7.0/12.0)*(P[id_m1].u   + p_center.u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+                    double P_l_v   = (7.0/12.0)*(P[id_m1].v   + p_center.v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+                    double P_l_w   = (7.0/12.0)*(P[id_m1].w   + p_center.w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
+                    double P_l_P   = (7.0/12.0)*(P[id_m1].P   + p_center.P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+
+                    auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, p_center.rho);
+                    auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   p_center.u);
+                    auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   p_center.v);
+                    auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   p_center.w);
+                    auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   p_center.P);
+                    
+                    UL[id] = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
+                    UR[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
+                }
+
+                {
+                    int id_p1 = idx(i, j + 1, k);
+                    int id_p2 = idx(i, j + 2, k);
+                    int id_m1 = idx(i, j - 1, k);
+                    int id_m2 = idx(i, j - 2, k);
+
+                    double P_r_rho = (7.0/12.0)*(p_center.rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+                    double P_r_u   = (7.0/12.0)*(p_center.u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+                    double P_r_v   = (7.0/12.0)*(p_center.v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+                    double P_r_w   = (7.0/12.0)*(p_center.w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
+                    double P_r_P   = (7.0/12.0)*(p_center.P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+
+                    double P_l_rho = (7.0/12.0)*(P[id_m1].rho + p_center.rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+                    double P_l_u   = (7.0/12.0)*(P[id_m1].u   + p_center.u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+                    double P_l_v   = (7.0/12.0)*(P[id_m1].v   + p_center.v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+                    double P_l_w   = (7.0/12.0)*(P[id_m1].w   + p_center.w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
+                    double P_l_P   = (7.0/12.0)*(P[id_m1].P   + p_center.P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+
+                    auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, p_center.rho);
+                    auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   p_center.u);
+                    auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   p_center.v);
+                    auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   p_center.w);
+                    auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   p_center.P);
+                    
+                    UT[id] = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
+                    UB[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
+                }
+
+                {
+                    int id_p1 = idx(i, j, k + 1);
+                    int id_p2 = idx(i, j, k + 2);
+                    int id_m1 = idx(i, j, k - 1);
+                    int id_m2 = idx(i, j, k - 2);
+
+                    double P_r_rho = (7.0/12.0)*(p_center.rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+                    double P_r_u   = (7.0/12.0)*(p_center.u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+                    double P_r_v   = (7.0/12.0)*(p_center.v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+                    double P_r_w   = (7.0/12.0)*(p_center.w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
+                    double P_r_P   = (7.0/12.0)*(p_center.P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+
+                    double P_l_rho = (7.0/12.0)*(P[id_m1].rho + p_center.rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+                    double P_l_u   = (7.0/12.0)*(P[id_m1].u   + p_center.u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+                    double P_l_v   = (7.0/12.0)*(P[id_m1].v   + p_center.v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+                    double P_l_w   = (7.0/12.0)*(P[id_m1].w   + p_center.w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
+                    double P_l_P   = (7.0/12.0)*(P[id_m1].P   + p_center.P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+
+                    auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, p_center.rho);
+                    auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   p_center.u);
+                    auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   p_center.v);
+                    auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   p_center.w);
+                    auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   p_center.P);
+                    
+                    UF[id]  = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
+                    UBa[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
+                }
+
+            }
+        }
+    }
 
 }
 ////////////////////////////////////////////////////////////////////////////
@@ -493,8 +788,8 @@ void Apply_Boundary(vector<ConsState>& U) {
     // Y
     #pragma omp parallel for collapse(2)
     for(int k = 0; k < Nz_tot ; k++){   
-        for(int i = 0; i < Nx_tot ; i++){
-            for(int g = 0 ; g < nghost ; g++){
+        for(int g = 0 ; g < nghost ; g++){
+            for(int i = 0; i < Nx_tot ; i++){
                 // outflow
                 // U[idx(i,g)]                    = U[idx(i, nghost)];
                 // U[idx(i, Ny_tot - nghost + g)] = U[idx(i, Ny_tot - nghost - 1)];
@@ -509,23 +804,34 @@ void Apply_Boundary(vector<ConsState>& U) {
 
     // Z
     #pragma omp parallel for collapse(2) 
-    for(int j = 0; j < Ny_tot ; j++){
-        for(int i = 0; i < Nx_tot ; i++){   
-            for(int g = 0 ; g < nghost ; g++){
+    for(int g = 0 ; g < nghost ; g++){  
+        for(int j = 0; j < Ny_tot ; j++){
+           for(int i = 0; i < Nx_tot ; i++){   
                 // outflow
                 // U[idx(g,j)]                    = U[idx(nghost,j)];
                 // U[idx(Nx_tot -  nghost + g,j)] = U[idx(Nx_tot - nghost - 1, j)];
 
                 // periodic
-                U[idx(i,j,g)]                 = U[idx(i,j,Nz+g)];
-                U[idx(i,j,Nz_tot - nghost+g)] = U[idx(i,j,nghost+g)];
+                // U[idx(i,j,g)]                 = U[idx(i,j,Nz+g)];
+                // U[idx(i,j,Nz_tot - nghost+g)] = U[idx(i,j,nghost+g)];
+
+                int ghost_low = g;
+                int fluid_low = 2 * nghost - 1 - g; 
+                
+                U[idx(i,j,ghost_low)]    =   U[idx(i,j,fluid_low)];
+                U[idx(i,j,ghost_low)].mw = - U[idx(i,j,fluid_low)].mw;
+
+                int ghost_up = Nz_tot - nghost + g;
+                int fluid_up = Nz_tot - nghost - 1 - g; 
+                
+                U[idx(i,j,ghost_up)]    =   U[idx(i,j,fluid_up)];
+                U[idx(i,j,ghost_up)].mw = - U[idx(i,j,fluid_up)].mw;
             }
         }
     }
 }
 //===========================================================================
 inline ConsState HLLC_Flux(const ConsState& UL_state, const ConsState& UR_state, char direction) {
-    
     PrimState PL = ConsToPrim(UL_state);
     PrimState PR = ConsToPrim(UR_state);
 
@@ -604,9 +910,7 @@ inline ConsState HLLC_Flux(const ConsState& UL_state, const ConsState& UR_state,
 // /////////////////////////////////////////////////////////////////////////////
 // /////////////////////////////  PDE Operator  ////////////////////////////////
 // /////////////////////////////////////////////////////////////////////////////
-vector<PrimState> PL(Nx_tot * Ny_tot * Nz_tot) , PR(Nx_tot * Ny_tot * Nz_tot) ;
-vector<PrimState> PT(Nx_tot * Ny_tot * Nz_tot) , PB(Nx_tot * Ny_tot * Nz_tot) ;
-vector<PrimState> PF(Nx_tot * Ny_tot * Nz_tot) , PBa(Nx_tot * Ny_tot * Nz_tot) ;
+
 
 void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt,  
     vector<ConsState>& UL,      vector<ConsState>& UR,
@@ -617,18 +921,42 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
     //===========================================================================
     // 1 : data reconstruction | 0.035 s
 
-    Data_Reconstruct_PLM(U,UL,UR,UT,UB,UF,UBa,PL,PR,PT,PB,PF,PBa);
-    // Data_Reconstruct_PPM(U,UL,UR,UT,UB,PL,PR,PT,PB);
+    // Data_Reconstruct_PLM(U,UL,UR,UT,UB,UF,UBa);
+    Data_Reconstruct_PPM(U,UL,UR,UT,UB,UF,UBa);
     
     //===========================================================================
     // 2 : Flux 
+    // #pragma omp parallel for collapse(3)
+    // for(int k = nghost; k <= Nz_tot-nghost; k++){   
+    //     for (int j = nghost; j <= Ny_tot-nghost; j++) {
+    //         for (int i = nghost; i <= Nx_tot-nghost; i++) {
+    //             int id = idx(i, j, k);
+
+    //             if (k < Nz_tot-nghost && j < Ny_tot-nghost) {
+    //                 Flux_x[id] = HLLC_Flux(UR[idx(i-1, j, k)], UL[id], 'x');
+    //             }
+
+    //             if (k < Nz_tot-nghost && i < Nx_tot-nghost) {
+    //                 Flux_y[id] = HLLC_Flux(UT[idx(i, j-1, k)], UB[id], 'y');
+    //             }
+
+    //             if (j < Ny_tot-nghost && i < Nx_tot-nghost) {
+    //                 Flux_z[id] = HLLC_Flux(UF[idx(i, j, k-1)], UBa[id], 'z');
+    //             }
+    //         }
+    //     }
+    // }
 
     // X
     #pragma omp parallel for collapse(3)
     for(int k = 0; k < Nz_tot ; k++){   
         for (int j = nghost; j < Ny_tot-nghost; j++) {
             for (int i = nghost; i <= Nx_tot-nghost; i++) {
-                Flux_x[idx(i, j , k)] = HLLC_Flux(UR[idx(i-1, j , k)], UL[idx(i, j , k)], 'x');
+                int id_L = idx(i-1, j , k);
+                int id_R = idx(i, j , k);
+                Flux_x[id_R] = HLLC_Flux(UR[id_L], UL[id_R], 'x');
+
+                // Flux_x[idx(i, j , k)] = HLLC_Flux(UR[idx(i-1, j , k)], UL[idx(i, j , k)], 'x');
             }
         }
     }
@@ -638,17 +966,23 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
     for(int k = 0; k < Nz_tot ; k++){   
         for (int j = nghost; j <= Ny_tot-nghost; j++) {
             for (int i = nghost; i < Nx_tot-nghost; i++) {
-                Flux_y[idx(i, j , k)] = HLLC_Flux(UT[idx(i, j-1 , k)], UB[idx(i, j , k)], 'y');
+                int id_B = idx(i, j-1 , k);
+                int id_T = idx(i, j , k);
+                Flux_y[id_T] = HLLC_Flux(UT[id_B], UB[id_T] , 'y');
+                // Flux_y[idx(i, j , k)] = HLLC_Flux(UT[idx(i, j-1 , k)], UB[idx(i, j , k)], 'y');
             }
         }
     }
 
     // Z
     #pragma omp parallel for collapse(3)
-    for(int k = 0; k <= Nz_tot ; k++){   
+    for(int k = nghost; k <= Nz_tot-nghost ; k++){   
         for (int j = nghost; j < Ny_tot-nghost; j++) {
             for (int i = nghost; i < Nx_tot-nghost; i++) {
-                Flux_z[idx(i, j , k)] = HLLC_Flux(UF[idx(i, j , k-1)], UBa[idx(i, j , k)], 'z');
+                int id_F  = idx(i, j , k-1);
+                int id_Ba = idx(i, j , k);
+                Flux_z[id_Ba] = HLLC_Flux(UF[id_F], UBa[id_Ba], 'z');
+                // Flux_z[idx(i, j , k)] = HLLC_Flux(UF[idx(i, j , k-1)], UBa[idx(i, j , k)], 'z');
             }
         }
     }
@@ -657,7 +991,7 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
     // 3: dU/dt 
 
     #pragma omp parallel for collapse(3)
-    for(int k = 0; k < Nz_tot ; k++){   
+    for(int k = nghost; k < Nz_tot-nghost ; k++){   
         for (int j = nghost; j < Ny_tot-nghost; j++) {
             for (int i = nghost; i < Nx_tot-nghost; i++) {
 
@@ -679,7 +1013,7 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
 // RK2
 vector<ConsState> k1(Nx_tot * Ny_tot * Nz_tot);
 vector<ConsState> k2(Nx_tot * Ny_tot * Nz_tot);
-// vector<ConsState> U_pred(Nx_tot * Ny_tot);
+
 vector<ConsState> UL(Nx_tot * Ny_tot * Nz_tot ) , UR(Nx_tot * Ny_tot * Nz_tot ) ;
 vector<ConsState> UT(Nx_tot * Ny_tot * Nz_tot ) , UB(Nx_tot * Ny_tot * Nz_tot ) ;
 vector<ConsState> UF(Nx_tot * Ny_tot * Nz_tot ) , UBa(Nx_tot * Ny_tot * Nz_tot ) ;
@@ -688,14 +1022,20 @@ vector<ConsState> Flux_x(Nx_tot * Ny_tot * Nz_tot) , Flux_y(Nx_tot * Ny_tot * Nz
 void RK2_Step(const vector<ConsState>& Un, vector<ConsState>& Unext, double dt) {
     
     // Riemman Solver 0.08s
+    // double s = omp_get_wtime();
     Euler_Riemann_Operator(Un, k1,UL,UR,UT,UB,UF,UBa,Flux_x,Flux_y,Flux_z);
+    // cout << "ERO  " <<omp_get_wtime() - s << endl;
 
+    // s = omp_get_wtime();
     #pragma omp parallel for
     for (int i = 0; i < Nx_tot * Ny_tot * Nz_tot; i++) {
         Unext[i] = Un[i] + k1[i] * dt;
     }
+    // cout << "Un   " <<omp_get_wtime() - s << endl;
 
+    // s = omp_get_wtime();
     Apply_Boundary(Unext);
+    // cout << "AB   " <<omp_get_wtime() - s << endl;
 
     Euler_Riemann_Operator(Unext, k2,UL,UR,UT,UB,UF,UBa,Flux_x,Flux_y,Flux_z);
 
@@ -785,14 +1125,12 @@ int main(){
             cout << " Simulation Time = " << t << " , dt = " << dt << endl;
             cout << "            Step = " << step << " | Center density rho = " << u0[idx(Nx_tot/2,Ny_tot/2,Nz_tot/2)].rho << "\n";
             cout << "       Real Time = " << total_calc_time << " s | RK2 Spend Time = " << t_end - t_start << " s\n";
-            t_start = omp_get_wtime();
 
             string Fname = "Final.csv";
-            // ofstream outFile("../" + Dir + "/"+ prob + "/" + prob + "_" + to_string(step/Estep) + Fname);
+
             ofstream outFile("../" + Dir + "/"+ prob + "/" + prob + "_" + stepStr + "_" + Fname);
             outFile << "time,x,y,z,rho,u,v,w,E,P\n";
-            // for (int i=0 ; i < Nx ; i++){
-            //     for (int j=0 ; j < Ny ; j++){
+
             for(int k = nghost; k < Nz_tot-nghost; k++) {
                 for(int j = nghost; j < Ny_tot-nghost; j++) {
                     for(int i = nghost; i < Nx_tot-nghost; i++) {
@@ -808,23 +1146,10 @@ int main(){
                 }
             }
             outFile.close();
+            t_start = omp_get_wtime();
         }
         
     }
     cout << "\n" << prob << endl;
-
-
-    //     // Check the center value
-    //     if (step % Estep == 0) {
-    //         char buffer[50];
-    //         std::snprintf(buffer, sizeof(buffer), "%04d", step / Estep);
-    //         std::string stepStr = buffer;
-
-    //         cout << "Step: " << step << " | Center density rho = " << u0[idx(Nx/2,Ny/2)].rho << endl;
-
-    //     }
-    // }
-
-    // cout << "End time evolution "<< endl;
 }
 
