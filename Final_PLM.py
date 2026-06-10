@@ -9,7 +9,7 @@
 # Numerical method:
 #   Time integration        : RK4
 #   Spatial reconstruction  : PLM reconstruction on primitive variables (Modified from PPM)
-#   Interface flux          : HLLC approximate Riemann solver
+#   Interface flux          : HLLC approximate Riemann solver / Lax-Friedrichs (LF) solver
 #   Boundary condition      : periodic for hydrodynamics
 #   Gravity                 : periodic FFT Poisson solver sourced by rho-rho_mean
 #
@@ -32,8 +32,8 @@ from datetime import datetime
 # =============================================================================
 Lx = 1.0
 Ly = 1.0
-Nx_In = 128
-Ny_In = 128
+Nx_In = 256
+Ny_In = 256
 nghost = 3
 
 gamma = 5.0 / 3.0
@@ -51,6 +51,7 @@ r_blast = 0.03      # radius of central energy injection region
 # Self-gravity switch
 # True means shock-compressed density sources Phi through Poisson equation.
 USE_SELF_GRAVITY = True
+SOLVER = 'LF'    # 'HLLC' for original HLLC Riemann solver, 'LF' for Lax-Friedrichs solver
 Ggrav = 5.0        # gravitational constant in code units; increase carefully
 
 # Numerical floors
@@ -165,6 +166,19 @@ def rusanov_flux_y(UL, UR):
     cR = np.sqrt(gamma * WR[..., 3] / WR[..., 0])
     a = np.maximum(np.abs(WL[..., 2]) + cL, np.abs(WR[..., 2]) + cR)
     return 0.5 * (flux_y(UL) + flux_y(UR)) - 0.5 * a[..., None] * (UR - UL)
+
+
+# =============================================================================
+# Lax-Friedrichs Flux 
+# =============================================================================
+def lf_flux_x(UL, UR, dt):
+    # F = 0.5 * ( Flux(U_R) + Flux(U_L) - (dx/dt) * (U_R - U_L) )
+    return 0.5 * (flux_x(UR) + flux_x(UL) - (dx / dt) * (UR - UL))
+
+
+def lf_flux_y(UL, UR, dt):
+    # G = 0.5 * ( Flux(U_R) + Flux(U_L) - (dy/dt) * (U_R - U_L) )
+    return 0.5 * (flux_y(UR) + flux_y(UL) - (dy / dt) * (UR - UL))
 
 
 # =============================================================================
@@ -459,16 +473,27 @@ def gravity_source(U):
 # =============================================================================
 # RHS and RK4 update
 # =============================================================================
-def compute_rhs(U):
+def compute_rhs(U, dt_current=None):
     Uwork = U.copy()
     Uwork = apply_floors(Uwork)
     apply_periodic_boundary(Uwork)
 
-    ULx, URx = reconstruct_x(Uwork)
-    Fx = hllc_flux_x(ULx, URx)
+    if SOLVER == 'LF':
+        # Lax-Friedrichs requires current timestep dt to handle numerical diffusion term.
+        if dt_current is None:
+            raise ValueError("Lax-Friedrichs solver requires dt_current passed into compute_rhs.")
+        # Under LF scheme, we directly use cell averages U_j and U_{j-1} without PLM reconstruction.
+        # Fx = lf_flux_x(Uwork[:-1, :, :], Uwork[1:, :, :], dt_current)
+        # Gy = lf_flux_y(Uwork[:, :-1, :], Uwork[:, 1:, :], dt_current)
+        Fx = rusanov_flux_x(Uwork[:-1, :, :], Uwork[1:, :, :])
+        Gy = rusanov_flux_y(Uwork[:, :-1, :], Uwork[:, 1:, :])
+    else:
+        # Default HLLC solver using PLM reconstruction
+        ULx, URx = reconstruct_x(Uwork)
+        Fx = hllc_flux_x(ULx, URx)
 
-    ULy, URy = reconstruct_y(Uwork)
-    Gy = hllc_flux_y(ULy, URy)
+        ULy, URy = reconstruct_y(Uwork)
+        Gy = hllc_flux_y(ULy, URy)
 
     rhs = np.zeros_like(Uwork)
     i0, i1 = nghost, Nx - nghost
@@ -484,19 +509,19 @@ def compute_rhs(U):
 
 
 def rk4_step(U, dt):
-    k1 = compute_rhs(U)
+    k1 = compute_rhs(U, dt_current=dt)
 
     U2 = apply_floors(U + 0.5 * dt * k1)
     apply_periodic_boundary(U2)
-    k2 = compute_rhs(U2)
+    k2 = compute_rhs(U2, dt_current=dt)
 
     U3 = apply_floors(U + 0.5 * dt * k2)
     apply_periodic_boundary(U3)
-    k3 = compute_rhs(U3)
+    k3 = compute_rhs(U3, dt_current=dt)
 
     U4 = apply_floors(U + dt * k3)
     apply_periodic_boundary(U4)
-    k4 = compute_rhs(U4)
+    k4 = compute_rhs(U4, dt_current=dt)
 
     Unew = U + (dt / 6.0) * (k1 + 2.0*k2 + 2.0*k3 + k4)
     Unew = apply_floors(Unew)
@@ -513,7 +538,12 @@ def compute_timestep(U, t):
 
     cs = np.sqrt(gamma * P / rho)
     max_speed = np.max(np.maximum(np.abs(u) + cs, np.abs(v) + cs))
-    dt_hydro = cfl * min(dx, dy) / max(max_speed, 1.0e-30)
+    
+    if SOLVER == 'LF':
+        # Pure Lax-Friedrichs stable condition requires CFL < 1.0 (typically smaller for stability)
+        dt_hydro = cfl * min(dx, dy) / max(max_speed, 1.0e-30)
+    else:
+        dt_hydro = cfl * min(dx, dy) / max(max_speed, 1.0e-30)
 
     dt = dt_hydro
 
@@ -612,7 +642,7 @@ def compute_gravitational_energy(U):
 def main():
     # output direction
     current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(".", "Final_test_data", "PLM", current_time_str)
+    output_dir = os.path.join(".", "Final_test_data", SOLVER, current_time_str)
     frames_dir = os.path.join(output_dir, "gif_frames")
     
     os.makedirs(frames_dir, exist_ok=True)
@@ -646,6 +676,9 @@ def main():
         f.write("# ---- Self-Gravity ----\n")
         f.write(f"USE_SELF_GRAVITY= {USE_SELF_GRAVITY}\n")
         f.write(f"Ggrav           = {Ggrav}       # gravitational constant\n\n")
+        
+        f.write("# ---- Riemann Solver ----\n")
+        f.write(f"SOLVER          = {SOLVER}\n\n")
         
         f.write("# ---- Numerical Floors ----\n")
         f.write(f"rho_floor       = {rho_floor:.1e}\n")
@@ -809,7 +842,7 @@ def main():
         im.set_data(frames[n].T)
         im.set_clim(np.min(frames[n]), np.max(frames[n]))
         # im.set_clim(0, 3.5)
-        title.set_text(f"Sedov-like blast + self-gravity, t={times[n]:.4f}")
+        title.set_text(f"Sedov-like blast + self-gravity ({SOLVER}), t={times[n]:.4f}")
         
         # save gif frames
         frame_filename = os.path.join(frames_dir, f"{n:02d}.png")
@@ -818,7 +851,7 @@ def main():
         return im, title
 
     anim = FuncAnimation(fig, update_frame, frames=len(frames), interval=80, blit=False)
-    anim.save(os.path.join(output_dir, "sedov_selfgravity_RK4_PLM_HLLC_density.gif"), writer=PillowWriter(fps=12))
+    anim.save(os.path.join(output_dir, f"sedov_selfgravity_RK4_PLM_{SOLVER}_density.gif"), writer=PillowWriter(fps=12))
     plt.close(fig)
 
     print(f"Data have been saved in {output_dir}")
@@ -826,7 +859,7 @@ def main():
     print("Saved: energy_total_hydro_gravity.png")
     print("Saved: energy_thermal_kinetic.png")
     print("Saved: energy_total_relative_error.png")
-    print("Saved: sedov_selfgravity_RK4_PLM_HLLC_density.gif")
+    print(f"Saved: sedov_selfgravity_RK4_PLM_{SOLVER}_density.gif")
     print("Saved: final_density_radial_profile.png")
     print("Saved: final_density_contrast_poisson_source.png")
     print("Saved: shock_radius_diagnostic.txt")
