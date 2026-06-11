@@ -9,7 +9,7 @@
 # Numerical method:
 #   Time integration        : RK4
 #   Spatial reconstruction  : PLM reconstruction on primitive variables (Modified from PPM)
-#   Interface flux          : HLLC approximate Riemann solver / Lax-Friedrichs (LF) solver
+#   Interface flux          : HLLC approximate Riemann solver / Rusanov Riemann solver
 #   Boundary condition      : periodic for hydrodynamics
 #   Gravity                 : periodic FFT Poisson solver sourced by rho-rho_mean
 #
@@ -32,8 +32,8 @@ from datetime import datetime
 # =============================================================================
 Lx = 1.0
 Ly = 1.0
-Nx_In = 256
-Ny_In = 256
+Nx_In = 128
+Ny_In = 128
 nghost = 3
 
 gamma = 5.0 / 3.0
@@ -51,7 +51,7 @@ r_blast = 0.03      # radius of central energy injection region
 # Self-gravity switch
 # True means shock-compressed density sources Phi through Poisson equation.
 USE_SELF_GRAVITY = True
-SOLVER = 'LF'    # 'HLLC' for original HLLC Riemann solver, 'LF' for Lax-Friedrichs solver
+SOLVER = 'Rusanov' # 'HLLC' for original HLLC Riemann solver, 'Rusanov' for Rusanov Riemann solver
 Ggrav = 5.0        # gravitational constant in code units; increase carefully
 
 # Numerical floors
@@ -169,19 +169,6 @@ def rusanov_flux_y(UL, UR):
 
 
 # =============================================================================
-# Lax-Friedrichs Flux 
-# =============================================================================
-def lf_flux_x(UL, UR, dt):
-    # F = 0.5 * ( Flux(U_R) + Flux(U_L) - (dx/dt) * (U_R - U_L) )
-    return 0.5 * (flux_x(UR) + flux_x(UL) - (dx / dt) * (UR - UL))
-
-
-def lf_flux_y(UL, UR, dt):
-    # G = 0.5 * ( Flux(U_R) + Flux(U_L) - (dy/dt) * (U_R - U_L) )
-    return 0.5 * (flux_y(UR) + flux_y(UL) - (dy / dt) * (UR - UL))
-
-
-# =============================================================================
 # HLLC approximate Riemann solver
 # =============================================================================
 def _hllc_flux_normal(UL, UR, direction="x"):
@@ -280,72 +267,6 @@ def hllc_flux_x(UL, UR):
 
 def hllc_flux_y(UL, UR):
     return _hllc_flux_normal(UL, UR, direction="y")
-
-# =============================================================================
-# PPM-like reconstruction (COMMENTED OUT - NOT USED)
-# =============================================================================
-# def ppm_reconstruct_1d(q):
-#     n = q.size
-#     q_face = np.zeros(n + 1)
-# 
-#     # fallback near boundaries
-#     q_face[1:n] = 0.5 * (q[:-1] + q[1:])
-#     q_face[0] = q[0]
-#     q_face[n] = q[-1]
-# 
-#     # 4th-order PPM face interpolation
-#     for k in range(2, n - 1):
-#         q_face[k] = (
-#             7.0 / 12.0 * (q[k - 1] + q[k])
-#             - 1.0 / 12.0 * (q[k - 2] + q[k + 1])
-#         )
-# 
-#     # interface monotonicity
-#     for k in range(1, n):
-#         qmin = min(q[k - 1], q[k])
-#         qmax = max(q[k - 1], q[k])
-#         q_face[k] = min(max(q_face[k], qmin), qmax)
-# 
-#     qL = q_face[:-1].copy()
-#     qR = q_face[1:].copy()
-# 
-#     # parabolic monotonicity constraint
-#     for i in range(n):
-#         if (qR[i] - q[i]) * (q[i] - qL[i]) <= 0.0:
-#             qL[i] = q[i]
-#             qR[i] = q[i]
-#         else:
-#             dq = qR[i] - qL[i]
-#             qa6 = 6.0 * (q[i] - 0.5 * (qL[i] + qR[i]))
-# 
-#             if dq * qa6 > dq * dq:
-#                 qL[i] = 3.0 * q[i] - 2.0 * qR[i]
-#             elif dq * qa6 < -dq * dq:
-#                 qR[i] = 3.0 * q[i] - 2.0 * qL[i]
-# 
-#     left_state = qR[:-1].copy()
-#     right_state = qL[1:].copy()
-# 
-#     return left_state, right_state
-# 
-# def reconstruct_x(U):
-#     W = conserved_to_primitive(U)
-#     WL = np.zeros((Nx-1, Ny, 4))
-#     WR = np.zeros((Nx-1, Ny, 4))
-#     for j in range(Ny):
-#         for m in range(4):
-#             WL[:, j, m], WR[:, j, m] = ppm_reconstruct_1d(W[:, j, m])
-#     return primitive_to_conserved(WL), primitive_to_conserved(WR)
-# 
-# 
-# def reconstruct_y(U):
-#     W = conserved_to_primitive(U)
-#     WL = np.zeros((Nx, Ny-1, 4))
-#     WR = np.zeros((Nx, Ny-1, 4))
-#     for i in range(Nx):
-#         for m in range(4):
-#             WL[i, :, m], WR[i, :, m] = ppm_reconstruct_1d(W[i, :, m])
-#     return primitive_to_conserved(WL), primitive_to_conserved(WR)
 
 # =============================================================================
 # PLM reconstruction implementation (Modified from RK4_PLM.py)
@@ -473,20 +394,18 @@ def gravity_source(U):
 # =============================================================================
 # RHS and RK4 update
 # =============================================================================
-def compute_rhs(U, dt_current=None):
+def compute_rhs(U):
     Uwork = U.copy()
     Uwork = apply_floors(Uwork)
     apply_periodic_boundary(Uwork)
 
-    if SOLVER == 'LF':
-        # Lax-Friedrichs requires current timestep dt to handle numerical diffusion term.
-        if dt_current is None:
-            raise ValueError("Lax-Friedrichs solver requires dt_current passed into compute_rhs.")
-        # Under LF scheme, we directly use cell averages U_j and U_{j-1} without PLM reconstruction.
-        # Fx = lf_flux_x(Uwork[:-1, :, :], Uwork[1:, :, :], dt_current)
-        # Gy = lf_flux_y(Uwork[:, :-1, :], Uwork[:, 1:, :], dt_current)
-        Fx = rusanov_flux_x(Uwork[:-1, :, :], Uwork[1:, :, :])
-        Gy = rusanov_flux_y(Uwork[:, :-1, :], Uwork[:, 1:, :])
+    if SOLVER == 'Rusanov':
+        # Upgrade to 2nd-order scheme by using PLM data reconstruction for Rusanov solver
+        ULx, URx = reconstruct_x(Uwork)
+        Fx = rusanov_flux_x(ULx, URx)
+
+        ULy, URy = reconstruct_y(Uwork)
+        Gy = rusanov_flux_y(ULy, URy)
     else:
         # Default HLLC solver using PLM reconstruction
         ULx, URx = reconstruct_x(Uwork)
@@ -509,19 +428,19 @@ def compute_rhs(U, dt_current=None):
 
 
 def rk4_step(U, dt):
-    k1 = compute_rhs(U, dt_current=dt)
+    k1 = compute_rhs(U)
 
     U2 = apply_floors(U + 0.5 * dt * k1)
     apply_periodic_boundary(U2)
-    k2 = compute_rhs(U2, dt_current=dt)
+    k2 = compute_rhs(U2)
 
     U3 = apply_floors(U + 0.5 * dt * k2)
     apply_periodic_boundary(U3)
-    k3 = compute_rhs(U3, dt_current=dt)
+    k3 = compute_rhs(U3)
 
     U4 = apply_floors(U + dt * k3)
     apply_periodic_boundary(U4)
-    k4 = compute_rhs(U4, dt_current=dt)
+    k4 = compute_rhs(U4)
 
     Unew = U + (dt / 6.0) * (k1 + 2.0*k2 + 2.0*k3 + k4)
     Unew = apply_floors(Unew)
@@ -539,12 +458,7 @@ def compute_timestep(U, t):
     cs = np.sqrt(gamma * P / rho)
     max_speed = np.max(np.maximum(np.abs(u) + cs, np.abs(v) + cs))
     
-    if SOLVER == 'LF':
-        # Pure Lax-Friedrichs stable condition requires CFL < 1.0 (typically smaller for stability)
-        dt_hydro = cfl * min(dx, dy) / max(max_speed, 1.0e-30)
-    else:
-        dt_hydro = cfl * min(dx, dy) / max(max_speed, 1.0e-30)
-
+    dt_hydro = cfl * min(dx, dy) / max(max_speed, 1.0e-30)
     dt = dt_hydro
 
     if USE_SELF_GRAVITY:
