@@ -24,18 +24,17 @@
 #include <algorithm>
 
 using namespace std;
-// namespace fs = std::filesystem;
 
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////  GLOBAL  //////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
 // Change here to setting in another txt file ???
 
-const int     Nx = 64*1 , Ny = 64*1 , Nz = 64;
-const double  xmax = 2.0 , ymax = 2.0 ,zmax = 1.0;
+const int     Nx = 64 , Ny = 64 , Nz = 64;
+const double  xmax = 0.5 , ymax = 0.5 ,zmax = 0.5;
 const double  dx = 2*float(xmax)/Nx , dy = 2*float(ymax)/Ny , dz = 2*float(zmax)/Nz ;
 const int     nghost = 3 ;
-const string  Dir="Data" , prob = "Euler_3D_KHI_PPM_v";
+const string  Dir="Data" , prob = "Euler_3D_TGV_PPM_2";
 
 
 const int   Nx_tot = Nx + 2 * nghost;
@@ -43,8 +42,8 @@ const int   Ny_tot = Ny + 2 * nghost;
 const int   Nz_tot = Nz + 2 * nghost;
 
 double      dt=1e-1 , t=0;
-int         total_step  = 2000;
-const int   Estep  = 20;                            // saving data step
+int         total_step  = 20000;
+const int   Estep  = 100;                            // saving data step
 double total_calc_time = 0.0;
 
 // Physics constant
@@ -55,6 +54,16 @@ const double G      = 10.0;                         // gravity const
 const double inv_dx = 1.0/dx , inv_dy = 1.0/dy , inv_dz = 1.0/dz ;
 const double rho_f  = 1e-6   , P_f    = 1e-6;       // Avoid unphysical value 
 const double R      = 0.2;                          // initial condition circle radius
+
+// vortex
+const double Gamma = 0.5; 
+const double sigma = 0.08; 
+const double d     = 0.3;      
+
+const double x_v1 = -d / 2.0;
+const double y_v1 = 0.0; // 0
+const double x_v2 = d / 2.0;
+const double y_v2 = 0.0; // 0
 
 ////////////////////////////////////////////////////////////////////////////
 /////////////////////////////  Grid  ///////////////////////////////////////
@@ -112,8 +121,6 @@ struct ConsState {
     }
 
 };
-
-inline double S_rho(double rho) { return (rho < 1e-10) ? 1e-10 : rho; }
 
 // inline int idx(int i, int j , int k)    { return k * Ny *Nx + j * Nx + i; }
 inline int idx(int i, int j, int k) { 
@@ -271,6 +278,9 @@ double Get_CFL_Dt(const vector<ConsState>& U) {
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////  Initial  /////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
+const double Lz = 2.0 * zmax;          
+const double kz = 2.0 * M_PI / Lz;     
+const double amp = 0.02 * d;
 
 void Initial_Value( vector<ConsState>& u0 ,vector<double>& x , vector<double>& y , vector<double>& z){
     // V1 - Testing struct
@@ -313,47 +323,138 @@ void Initial_Value( vector<ConsState>& u0 ,vector<double>& x , vector<double>& y
     for (int k=0 ; k<Nz_tot ; k++){
         for (int j=0 ; j<Ny_tot ; j++){
             for (int i=0 ; i<Nx_tot ; i++){      
-            const int id = idx(i, j ,k );
-            double rho, u, v, w, P;
-            double ang = 45;
-            double rad = ang * M_PI / 180.0;
+                const int id = idx(i, j ,k );
+                // double rho, u, v, w, P;
 
-            // P = 2.5;
-            // rho= 10;
-            // u = 0;
-            // v = 0;
+                // P  = 2.5; 
+                // const double v0 = 0.5;
+
+                // if (abs(z[k]) < 0.25) {
+                //     rho =  2.0 ;       
+                //     u   =  v0 ;
+                //     v   =  0.0 ;
+                // } else {
+                //     rho =  1.0 ;             
+                //     u   =  -v0  ;
+                //     v   =  0   ;
+                // }
+
+                // double perturbation = 0.1 * sin(2.0 * M_PI * x[i] / (2.0 * xmax));
+                // w = perturbation;
+                
+                // u0[id].rho = rho;
+                // u0[id].mu  = rho * u;
+                // u0[id].mv  = rho * v;
+                // u0[id].mw  = rho * w;
+                // u0[id].E   = P / (gam - 1.0) + 0.5 * rho * (u * u + v * v + w * w);
+
+                // ==============================
+                // P = 2.5; 
+                // const double v0 = 0.5;
+                // const double z_coord = z[k];
+                // const double a = 0.01;
+                // double smooth_factor = 0.5 * (tanh((z_coord + 0.25) / a) - tanh((z_coord - 0.25) / a));
+
+                // rho = 1.0 + (2.0 - 1.0) * smooth_factor; 
+                // u   = v0 - 2.0 * v0 * smooth_factor;    
+                // v   = 0.0;
+
+                // const double sigma = 0.05; 
+                // double gaussian_envelope = exp(-(z_coord + 0.25) * (z_coord + 0.25) / (sigma * sigma)) +
+                //                        exp(-(z_coord - 0.25) * (z_coord - 0.25) / (sigma * sigma));
+                // double Lx = 2.0 * xmax; 
+                // double Ly = 2.0 * ymax; 
+                
+                // double kx = 2.0 * M_PI / Lx;
+                // double ky = 2.0 * M_PI / Ly;
+
+                // double eps = 0.1;
+
+                // w = 0.01 * sin(kx * x[i]) * (1.0 + eps * cos(ky * y[j])) * gaussian_envelope;
+                
+                // u0[id].rho = rho;
+                // u0[id].mu  = rho * u;
+                // u0[id].mv  = rho * v;
+                // u0[id].mw  = rho * w;
+                // u0[id].E   = P / (gam - 1.0) + 0.5 * rho * (u * u + v * v + w * w);
+
+                // ==============================
+                // ==============================
+                // ==============================
+                // const int id = idx(i, j ,k );
+                
+                // double r1 = sqrt((x[i]-x1)*(x[i]-x_v1) + (y[j]-y1_v)*(y[j]-y_v1));
+                // double r2 = sqrt((x[i]-x2)*(x[i]-x_v2) + (y[j]-y2_v)*(y[j]-y_v2));
+                
+                // double vt1 = 0.0;
+                // if (r1 > 1e-10) vt1 = (Gamma / (2.0 * M_PI * r1)) * (1.0 - exp(-(r1*r1)/(sigma*sigma)));
+                // double u1 = -vt1 * (y[j] - y_v1) / r1;
+                // double v1 =  vt1 * (x[i] - x_v1) / r1;
+
+                // double vt2 = 0.0;
+                // if (r2 > 1e-10) vt2 = (-Gamma / (2.0 * M_PI * r2)) * (1.0 - exp(-(r2*r2)/(sigma*sigma)));
+                // double u2 = -vt2 * (y[j] - y_v2) / r2;
+                // double v2 =  vt2 * (x[i] - x_v2) / r2;
+
+                // double u = u1 + u2;
+                // double v = v1 + v2;
+                // double w = 0.0;
+
+
+                // // add a sine wave to generate reconnection
+                // double kz = 2.0 * M_PI / (2.0 * zmax);
+                // w = 0.005 * sin(kz * z[k]) * (exp(-(r1*r1)/(sigma*sigma)) + exp(-(r2*r2)/(sigma*sigma)));
+
+                // double P = 2.5;
+                // double rho = 1.0; 
+                
+                // u0[id].rho = rho;
+                // u0[id].mu  = rho * u;
+                // u0[id].mv  = rho * v;
+                // u0[id].mw  = rho * w;
+                // u0[id].E   = P / (gam - 1.0) + 0.5 * rho * (u*u + v*v + w*w);
+
+
+                // ==============================
+                // ==============================
+                // ==============================
+                double x_v1_perturbed = x_v1 + amp * cos(kz * z[k]);
+                double x_v2_perturbed = x_v2 - amp * cos(kz * z[k]);
+                double y_v1_perturbed = y_v1 + amp * sin(kz * z[k]); //  amp * sin(kz * z[k]) 
+                double y_v2_perturbed = y_v2 - amp * sin(kz * z[k]);
+
+                double r1_sq = (x[i] - x_v1_perturbed) * (x[i] - x_v1_perturbed) + 
+                            (y[j] - y_v1_perturbed) * (y[j] - y_v1_perturbed);
+                double r2_sq = (x[i] - x_v2_perturbed) * (x[i] - x_v2_perturbed) + 
+                            (y[j] - y_v2_perturbed) * (y[j] - y_v2_perturbed);
+                
+                double u1 = 0.0, v1 = 0.0;
+                if (r1_sq > 1e-12) {
+                    double factor1 = (Gamma / (2.0 * M_PI * r1_sq)) * (1.0 - exp(-r1_sq / (sigma * sigma)));
+                    u1 = -factor1 * (y[j] - y_v1_perturbed);
+                    v1 =  factor1 * (x[i] - x_v1_perturbed);
+                }
+
+                double u2 = 0.0, v2 = 0.0;
+                if (r2_sq > 1e-12) {
+                    double factor2 = (-Gamma / (2.0 * M_PI * r2_sq)) * (1.0 - exp(-r2_sq / (sigma * sigma)));
+                    u2 = -factor2 * (y[j] - y_v2_perturbed);
+                    v2 =  factor2 * (x[i] - x_v2_perturbed);
+                }
+
+                double u = u1 + u2;
+                double v = v1 + v2;
+                double w = 0.0; 
+
+                double P = 2.5;
+                double rho = 1.0; 
+                
+                u0[id].rho = rho;
+                u0[id].mu  = rho * u;
+                u0[id].mv  = rho * v;
+                u0[id].mw  = rho * w;
+                u0[id].E   = P / (gam - 1.0) + 0.5 * rho * (u*u + v*v + w*w);
             
-            // if (x[i]*x[i]+y[j]*y[j] <= 0.2) { 
-            //     w = 2;
-            // }else{
-            //     w=0;
-            // }
-
-            P  = 2.5; 
-            const double v0 = 1.0;
-
-            if (abs(z[k]) < 0.25) {
-                rho =  2.0 ;       
-                u   =  -v0 ;
-                v   =  0.0 ;
-            } else {
-                rho =  1.0 ;             
-                u   =  v0  ;
-                v   =  0   ;
-                // v   =  v0 * cos(rad) ;
-                // u   = v0 * cos(rad);     
-                // v   = v0 * sin(rad); 
-            }
-
-            double perturbation = 0.1 * sin(2.0 * M_PI * x[i] / (2.0 * xmax));
-            w = perturbation;
-            
-            u0[id].rho = rho;
-            u0[id].mu  = rho * u;
-            u0[id].mv  = rho * v;
-            u0[id].mw  = rho * w;
-            u0[id].E   = P / (gam - 1.0) + 0.5 * rho * (u * u + v * v + w * w);
-
             }
         }
     }
@@ -539,124 +640,6 @@ auto monetize = [](double L, double R, double C) -> pair<double, double> {
             return {L, R};
 };
 
-// void Data_Reconstruct_PPM(    
-//     const vector<ConsState>& U,
-//     vector<ConsState>& UL ,    vector<ConsState>& UR ,   
-//     vector<ConsState>& UT ,    vector<ConsState>& UB ,
-//     vector<ConsState>& UF ,    vector<ConsState>& UBa)
-// {   
-//     #pragma omp parallel for
-//     for (int i = 0; i < Nx_tot * Ny_tot * Nz_tot; i++) {
-//         P[i] = ConsToPrim(U[i]);
-//     }
-
-//     // X Reconstruction
-//     #pragma omp parallel for collapse(3) 
-//     for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
-//         for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
-//             for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
-//                 int id    = idx(i, j, k);
-//                 int id_p1 = idx(i + 1, j, k);
-//                 int id_p2 = idx(i + 2, j, k);
-//                 int id_m1 = idx(i - 1, j, k);
-//                 int id_m2 = idx(i - 2, j, k);
-
-//                 double P_r_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
-//                 double P_r_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
-//                 double P_r_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
-//                 double P_r_w   = (7.0/12.0)*(P[id].w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
-//                 double P_r_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
-
-//                 double P_l_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
-//                 double P_l_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
-//                 double P_l_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
-//                 double P_l_w   = (7.0/12.0)*(P[id_m1].w   + P[id].w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
-//                 double P_l_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
-
-//                 auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, P[id].rho);
-//                 auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   P[id].u);
-//                 auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   P[id].v);
-//                 auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   P[id].w);
-//                 auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   P[id].P);
-                
-//                 UL[id] = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
-//                 UR[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
-//             }
-//         }
-//     }
-
-//     // Y Reconstruction
-//     #pragma omp parallel for collapse(3) 
-//     for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
-//         for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
-//             for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
-//                 int id    = idx(i, j, k);
-//                 int id_p1 = idx(i , j + 1, k);
-//                 int id_p2 = idx(i , j + 2, k);
-//                 int id_m1 = idx(i , j - 1, k);
-//                 int id_m2 = idx(i , j - 2, k);
-
-//                 double P_r_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
-//                 double P_r_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
-//                 double P_r_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
-//                 double P_r_w   = (7.0/12.0)*(P[id].w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
-//                 double P_r_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
-
-//                 double P_l_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
-//                 double P_l_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
-//                 double P_l_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
-//                 double P_l_w   = (7.0/12.0)*(P[id_m1].w   + P[id].w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
-//                 double P_l_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
-
-//                 auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, P[id].rho);
-//                 auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   P[id].u);
-//                 auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   P[id].v);
-//                 auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   P[id].w);
-//                 auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   P[id].P);
-                
-//                 UT[id] = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
-//                 UB[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
-//             }
-//         }
-//     }
-
-//     // Z Reconstruction
-//     #pragma omp parallel for collapse(3) 
-//     for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
-//         for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
-//             for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
-//                 int id    = idx(i, j, k);
-//                 int id_p1 = idx(i , j , k + 1);
-//                 int id_p2 = idx(i , j , k + 2);
-//                 int id_m1 = idx(i , j , k - 1);
-//                 int id_m2 = idx(i , j , k - 2);
-
-//                 double P_r_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
-//                 double P_r_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
-//                 double P_r_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
-//                 double P_r_w   = (7.0/12.0)*(P[id].w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
-//                 double P_r_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
-
-//                 double P_l_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
-//                 double P_l_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
-//                 double P_l_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
-//                 double P_l_w   = (7.0/12.0)*(P[id_m1].w   + P[id].w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
-//                 double P_l_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
-
-//                 auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, P[id].rho);
-//                 auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   P[id].u);
-//                 auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   P[id].v);
-//                 auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   P[id].w);
-//                 auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   P[id].P);
-                
-//                 UF[id]  = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
-//                 UBa[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
-//             }
-//         }
-//     }
-
-// }
-
 void Data_Reconstruct_PPM(    
     const vector<ConsState>& U,
     vector<ConsState>& UL ,    vector<ConsState>& UR ,   
@@ -668,103 +651,113 @@ void Data_Reconstruct_PPM(
         P[i] = ConsToPrim(U[i]);
     }
 
+    // X Reconstruction
     #pragma omp parallel for collapse(3) 
     for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
         for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
             for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
+                int id_p2 = idx(i + 2, j, k);
+                int id_p1 = idx(i + 1, j, k);
+                int id    = idx(i, j, k);
+                int id_m1 = idx(i - 1, j, k);
+                int id_m2 = idx(i - 2, j, k);
+
+                double P_r_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+                double P_r_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+                double P_r_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+                double P_r_w   = (7.0/12.0)*(P[id].w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
+                double P_r_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+
+                double P_l_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+                double P_l_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+                double P_l_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+                double P_l_w   = (7.0/12.0)*(P[id_m1].w   + P[id].w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
+                double P_l_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+
+                auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, P[id].rho);
+                auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   P[id].u);
+                auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   P[id].v);
+                auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   P[id].w);
+                auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   P[id].P);
                 
-                int id = idx(i, j, k);
-                PrimState p_center = P[id]; 
+                UL[id] = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
+                UR[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
+            }
+        }
+    }
 
-                {
-                    int id_p1 = idx(i + 1, j, k);
-                    int id_p2 = idx(i + 2, j, k);
-                    int id_m1 = idx(i - 1, j, k);
-                    int id_m2 = idx(i - 2, j, k);
+    // Y Reconstruction
+    #pragma omp parallel for collapse(3) 
+    for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
+        for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
+            for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
+                int id_p2 = idx(i , j + 2, k);
+                int id_p1 = idx(i , j + 1, k);
+                int id    = idx(i, j, k);
+                int id_m1 = idx(i , j - 1, k);
+                int id_m2 = idx(i , j - 2, k);
 
-                    double P_r_rho = (7.0/12.0)*(p_center.rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
-                    double P_r_u   = (7.0/12.0)*(p_center.u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
-                    double P_r_v   = (7.0/12.0)*(p_center.v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
-                    double P_r_w   = (7.0/12.0)*(p_center.w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
-                    double P_r_P   = (7.0/12.0)*(p_center.P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+                double P_t_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+                double P_t_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+                double P_t_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+                double P_t_w   = (7.0/12.0)*(P[id].w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
+                double P_t_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
 
-                    double P_l_rho = (7.0/12.0)*(P[id_m1].rho + p_center.rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
-                    double P_l_u   = (7.0/12.0)*(P[id_m1].u   + p_center.u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
-                    double P_l_v   = (7.0/12.0)*(P[id_m1].v   + p_center.v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
-                    double P_l_w   = (7.0/12.0)*(P[id_m1].w   + p_center.w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
-                    double P_l_P   = (7.0/12.0)*(P[id_m1].P   + p_center.P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+                double P_b_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+                double P_b_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+                double P_b_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+                double P_b_w   = (7.0/12.0)*(P[id_m1].w   + P[id].w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
+                double P_b_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
 
-                    auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, p_center.rho);
-                    auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   p_center.u);
-                    auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   p_center.v);
-                    auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   p_center.w);
-                    auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   p_center.P);
-                    
-                    UL[id] = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
-                    UR[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
-                }
+                auto [rho_B, rho_T] = monetize(P_b_rho, P_t_rho, P[id].rho);
+                auto [u_B, u_T]     = monetize(P_b_u,   P_t_u,   P[id].u);
+                auto [v_B, v_T]     = monetize(P_b_v,   P_t_v,   P[id].v);
+                auto [w_B, w_T]     = monetize(P_b_w,   P_t_w,   P[id].w);
+                auto [P_B, P_T]     = monetize(P_b_P,   P_t_P,   P[id].P);
+                
+                UB[id] = PrimToCons({rho_B, u_B, v_B, w_B , P_B});
+                UT[id] = PrimToCons({rho_T, u_T, v_T, w_T , P_T});
+            }
+        }
+    }
 
-                {
-                    int id_p1 = idx(i, j + 1, k);
-                    int id_p2 = idx(i, j + 2, k);
-                    int id_m1 = idx(i, j - 1, k);
-                    int id_m2 = idx(i, j - 2, k);
+    // Z Reconstruction
+    #pragma omp parallel for collapse(3) 
+    for (int k = nghost-1; k <= Nz_tot-nghost; k++) {
+        for (int j = nghost-1; j <= Ny_tot-nghost; j++) {
+            for (int i = nghost-1; i <= Nx_tot-nghost; i++) {
+                int id_p2 = idx(i , j , k + 2);
+                int id_p1 = idx(i , j , k + 1);
+                int id    = idx(i, j, k);
+                int id_m1 = idx(i , j , k - 1);
+                int id_m2 = idx(i , j , k - 2);
 
-                    double P_r_rho = (7.0/12.0)*(p_center.rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
-                    double P_r_u   = (7.0/12.0)*(p_center.u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
-                    double P_r_v   = (7.0/12.0)*(p_center.v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
-                    double P_r_w   = (7.0/12.0)*(p_center.w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
-                    double P_r_P   = (7.0/12.0)*(p_center.P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
+                double P_F_rho = (7.0/12.0)*(P[id].rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
+                double P_F_u   = (7.0/12.0)*(P[id].u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
+                double P_F_v   = (7.0/12.0)*(P[id].v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
+                double P_F_w   = (7.0/12.0)*(P[id].w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
+                double P_F_P   = (7.0/12.0)*(P[id].P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
 
-                    double P_l_rho = (7.0/12.0)*(P[id_m1].rho + p_center.rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
-                    double P_l_u   = (7.0/12.0)*(P[id_m1].u   + p_center.u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
-                    double P_l_v   = (7.0/12.0)*(P[id_m1].v   + p_center.v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
-                    double P_l_w   = (7.0/12.0)*(P[id_m1].w   + p_center.w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
-                    double P_l_P   = (7.0/12.0)*(P[id_m1].P   + p_center.P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
+                double P_Ba_rho = (7.0/12.0)*(P[id_m1].rho + P[id].rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
+                double P_Ba_u   = (7.0/12.0)*(P[id_m1].u   + P[id].u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
+                double P_Ba_v   = (7.0/12.0)*(P[id_m1].v   + P[id].v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
+                double P_Ba_w   = (7.0/12.0)*(P[id_m1].w   + P[id].w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
+                double P_Ba_P   = (7.0/12.0)*(P[id_m1].P   + P[id].P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
 
-                    auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, p_center.rho);
-                    auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   p_center.u);
-                    auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   p_center.v);
-                    auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   p_center.w);
-                    auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   p_center.P);
-                    
-                    UT[id] = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
-                    UB[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
-                }
-
-                {
-                    int id_p1 = idx(i, j, k + 1);
-                    int id_p2 = idx(i, j, k + 2);
-                    int id_m1 = idx(i, j, k - 1);
-                    int id_m2 = idx(i, j, k - 2);
-
-                    double P_r_rho = (7.0/12.0)*(p_center.rho + P[id_p1].rho) - (1.0/12.0)*(P[id_m1].rho + P[id_p2].rho);
-                    double P_r_u   = (7.0/12.0)*(p_center.u   + P[id_p1].u  ) - (1.0/12.0)*(P[id_m1].u   + P[id_p2].u  );
-                    double P_r_v   = (7.0/12.0)*(p_center.v   + P[id_p1].v  ) - (1.0/12.0)*(P[id_m1].v   + P[id_p2].v  );
-                    double P_r_w   = (7.0/12.0)*(p_center.w   + P[id_p1].w  ) - (1.0/12.0)*(P[id_m1].w   + P[id_p2].w  );
-                    double P_r_P   = (7.0/12.0)*(p_center.P   + P[id_p1].P  ) - (1.0/12.0)*(P[id_m1].P   + P[id_p2].P  );
-
-                    double P_l_rho = (7.0/12.0)*(P[id_m1].rho + p_center.rho) - (1.0/12.0)*(P[id_m2].rho + P[id_p1].rho);
-                    double P_l_u   = (7.0/12.0)*(P[id_m1].u   + p_center.u  ) - (1.0/12.0)*(P[id_m2].u   + P[id_p1].u  );
-                    double P_l_v   = (7.0/12.0)*(P[id_m1].v   + p_center.v  ) - (1.0/12.0)*(P[id_m2].v   + P[id_p1].v  );
-                    double P_l_w   = (7.0/12.0)*(P[id_m1].w   + p_center.w  ) - (1.0/12.0)*(P[id_m2].w   + P[id_p1].w  );
-                    double P_l_P   = (7.0/12.0)*(P[id_m1].P   + p_center.P  ) - (1.0/12.0)*(P[id_m2].P   + P[id_p1].P  );
-
-                    auto [rho_L, rho_R] = monetize(P_l_rho, P_r_rho, p_center.rho);
-                    auto [u_L, u_R]     = monetize(P_l_u,   P_r_u,   p_center.u);
-                    auto [v_L, v_R]     = monetize(P_l_v,   P_r_v,   p_center.v);
-                    auto [w_L, w_R]     = monetize(P_l_w,   P_r_w,   p_center.w);
-                    auto [P_L, P_R]     = monetize(P_l_P,   P_r_P,   p_center.P);
-                    
-                    UF[id]  = PrimToCons({rho_L, u_L, v_L, w_L, P_L});
-                    UBa[id] = PrimToCons({rho_R, u_R, v_R, w_R, P_R});
-                }
-
+                auto [rho_Ba, rho_F] = monetize(P_Ba_rho, P_F_rho, P[id].rho);
+                auto [u_Ba, u_F]     = monetize(P_Ba_u,   P_F_u,   P[id].u);
+                auto [v_Ba, v_F]     = monetize(P_Ba_v,   P_F_v,   P[id].v);
+                auto [w_Ba, w_F]     = monetize(P_Ba_w,   P_F_w,   P[id].w);
+                auto [P_Ba, P_F]     = monetize(P_Ba_P,   P_F_P,   P[id].P);
+                
+                UF[id]  = PrimToCons({rho_F, u_F, v_F, w_F, P_F});
+                UBa[id] = PrimToCons({rho_Ba, u_Ba, v_Ba, w_Ba, P_Ba});
             }
         }
     }
 
 }
+
 ////////////////////////////////////////////////////////////////////////////
 ///////////////////////////  Boundary  /////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////
@@ -812,20 +805,20 @@ void Apply_Boundary(vector<ConsState>& U) {
                 // U[idx(Nx_tot -  nghost + g,j)] = U[idx(Nx_tot - nghost - 1, j)];
 
                 // periodic
-                // U[idx(i,j,g)]                 = U[idx(i,j,Nz+g)];
-                // U[idx(i,j,Nz_tot - nghost+g)] = U[idx(i,j,nghost+g)];
+                U[idx(i,j,g)]                 = U[idx(i,j,Nz+g)];
+                U[idx(i,j,Nz_tot - nghost+g)] = U[idx(i,j,nghost+g)];
 
-                int ghost_low = g;
-                int fluid_low = 2 * nghost - 1 - g; 
+                // int ghost_low = g;
+                // int fluid_low = 2 * nghost - 1 - g; 
                 
-                U[idx(i,j,ghost_low)]    =   U[idx(i,j,fluid_low)];
-                U[idx(i,j,ghost_low)].mw = - U[idx(i,j,fluid_low)].mw;
+                // U[idx(i,j,ghost_low)]    =   U[idx(i,j,fluid_low)];
+                // U[idx(i,j,ghost_low)].mw = - U[idx(i,j,fluid_low)].mw;
 
-                int ghost_up = Nz_tot - nghost + g;
-                int fluid_up = Nz_tot - nghost - 1 - g; 
+                // int ghost_up = Nz_tot - nghost + g;
+                // int fluid_up = Nz_tot - nghost - 1 - g; 
                 
-                U[idx(i,j,ghost_up)]    =   U[idx(i,j,fluid_up)];
-                U[idx(i,j,ghost_up)].mw = - U[idx(i,j,fluid_up)].mw;
+                // U[idx(i,j,ghost_up)]    =   U[idx(i,j,fluid_up)];
+                // U[idx(i,j,ghost_up)].mw = - U[idx(i,j,fluid_up)].mw;
             }
         }
     }
@@ -949,7 +942,8 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
 
     // X
     #pragma omp parallel for collapse(3)
-    for(int k = 0; k < Nz_tot ; k++){   
+    for(int k = nghost; k <= Nz_tot-nghost ; k++){   
+    // for(int k = 0; k < Nz_tot ; k++){   
         for (int j = nghost; j < Ny_tot-nghost; j++) {
             for (int i = nghost; i <= Nx_tot-nghost; i++) {
                 int id_L = idx(i-1, j , k);
@@ -963,7 +957,8 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
 
     // Y
     #pragma omp parallel for collapse(3)
-    for(int k = 0; k < Nz_tot ; k++){   
+    for(int k = nghost; k <= Nz_tot-nghost ; k++){   
+    // for(int k = 0; k < Nz_tot ; k++){   
         for (int j = nghost; j <= Ny_tot-nghost; j++) {
             for (int i = nghost; i < Nx_tot-nghost; i++) {
                 int id_B = idx(i, j-1 , k);
@@ -977,6 +972,7 @@ void Euler_Riemann_Operator(const vector<ConsState>& U , vector<ConsState>& dUdt
     // Z
     #pragma omp parallel for collapse(3)
     for(int k = nghost; k <= Nz_tot-nghost ; k++){   
+    // for(int k = 0; k < Nz_tot ; k++){   
         for (int j = nghost; j < Ny_tot-nghost; j++) {
             for (int i = nghost; i < Nx_tot-nghost; i++) {
                 int id_F  = idx(i, j , k-1);
