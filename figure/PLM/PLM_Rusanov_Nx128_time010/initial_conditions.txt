@@ -1,0 +1,39 @@
+=============================================================================
+ SIMULATION INITIAL CONDITIONS & PARAMETERS
+=============================================================================
+
+# ---- Grid & Domain ----
+Lx              = 1.0
+Ly              = 1.0
+Nx_In           = 128
+Ny_In           = 128
+nghost          = 3
+
+# ---- Numerics & Time ----
+gamma           = 1.666667
+cfl             = 0.35
+end_time        = 0.1
+output_interval = 0.0025
+
+# ---- Sedov Blast Wave ----
+rho0            = 1.0       # uniform ambient pre-shock density
+P_amb           = 1.0e-05  # ambient pressure
+E0              = 1.0       # injected thermal energy per unit length in 2D
+r_blast         = 0.03     # radius of central energy injection region
+
+# ---- Self-Gravity ----
+USE_SELF_GRAVITY= True
+Ggrav           = 5.0       # gravitational constant
+
+# ---- Riemann Solver ----
+SOLVER          = Rusanov
+
+# ---- Numerical Floors ----
+rho_floor       = 1.0e-12
+P_floor         = 1.0e-12
+
+# ---- Derived Grid Constants ----
+Nx              = 134
+Ny              = 134
+dx              = 7.812500e-03
+dy              = 7.812500e-03
